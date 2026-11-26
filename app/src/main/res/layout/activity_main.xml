@@ -1,0 +1,379 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="NexaKeyboard — সেটিংস"
+            android:textSize="26sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="বাংলা (বিজয়) + ইংরেজি কীবোর্ড — দ্বিতীয় সংস্করণ (v2)"
+            android:textSize="15sp" />
+
+        <!-- 1. Enable -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="১. কীবোর্ড চালু করুন"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btn_enable"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="কীবোর্ড চালু করুন" />
+
+        <Button
+            android:id="@+id/btn_pick"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="কীবোর্ড বেছে নিন" />
+
+        <EditText
+            android:id="@+id/edit_test"
+            android:layout_width="match_parent"
+            android:layout_height="120dp"
+            android:layout_marginTop="8dp"
+            android:gravity="top"
+            android:hint="এখানে টাইপ করে দেখুন…"
+            android:inputType="textMultiLine" />
+
+        <!-- 2. Gemini API key -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="২. Gemini API কী (ভয়েস রিফাইন + AI)"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="অ্যাপ ইনস্টল করার পরে এখানে কী বসান। পরে যখন খুশি বদলানো যাবে। কী-টা ফোনেই থাকে, কোডে লেখা থাকে না।"
+            android:textSize="14sp" />
+
+        <EditText
+            android:id="@+id/edit_api_key"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:hint="Gemini API কী লিখুন"
+            android:inputType="textPassword"
+            android:importantForAutofill="no" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btn_save_key"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Save / Update" />
+
+            <Button
+                android:id="@+id/btn_test_key"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Test" />
+
+            <Button
+                android:id="@+id/btn_clear_key"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Clear" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/text_key_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="API key: not set"
+            android:textSize="15sp" />
+
+        <!-- 3. Tone -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="৩. Tone (AI-তে লেখার ভঙ্গি)"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/radio_tone"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/radio_tone_professional"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Professional" />
+
+            <RadioButton
+                android:id="@+id/radio_tone_casual"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Casual" />
+
+            <RadioButton
+                android:id="@+id/radio_tone_formal"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Formal" />
+
+            <RadioButton
+                android:id="@+id/radio_tone_friendly"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Friendly" />
+        </RadioGroup>
+
+        <!-- 4. Autocorrect per language -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="৪. অটোকারেক্ট (প্রতি ভাষায় আলাদা)"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <Switch
+            android:id="@+id/switch_autocorrect_bangla"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Autocorrect Bangla (ডিফল্ট: বন্ধ)" />
+
+        <Switch
+            android:id="@+id/switch_autocorrect_english"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Autocorrect English (ডিফল্ট: চালু)" />
+
+        <!-- 5. Theme editor -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="৫. থিম এডিটর (Gboard-ধাঁচ)"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <Switch
+            android:id="@+id/switch_theme"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:checked="true"
+            android:text="ডার্ক থিম" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="কি-র রং"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/radio_key_colour"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/radio_colour_grey"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Gboard grey" />
+
+            <RadioButton
+                android:id="@+id/radio_colour_dark"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Dark" />
+
+            <RadioButton
+                android:id="@+id/radio_colour_blue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Blue" />
+        </RadioGroup>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="কি-র আকার"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/radio_key_shape"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/radio_shape_rounded"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Rounded" />
+
+            <RadioButton
+                android:id="@+id/radio_shape_square"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Square" />
+        </RadioGroup>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="কীবোর্ডের উচ্চতা"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/radio_keyboard_height"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/radio_height_short"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Short" />
+
+            <RadioButton
+                android:id="@+id/radio_height_medium"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Medium" />
+
+            <RadioButton
+                android:id="@+id/radio_height_tall"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Tall" />
+        </RadioGroup>
+
+        <!-- 6. Toolbar order -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="৬. সাজেশন বারের ক্রম (Paste / Undo / Redo)"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Up / Down চেপে ক্রম বদলান — কীবোর্ডে সেই ক্রমেই দেখাবে।"
+            android:textSize="14sp" />
+
+        <LinearLayout
+            android:id="@+id/layout_toolbar_order"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="vertical" />
+
+        <!-- 7. Quick phrases -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="৭. Quick Phrases"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <EditText
+                android:id="@+id/edit_new_phrase"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="নতুন ফ্রেজ লিখুন" />
+
+            <Button
+                android:id="@+id/btn_add_phrase"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Add" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/layout_phrases"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="vertical" />
+
+        <!-- 8. Clipboard -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="৮. ক্লিপবোর্ড হিস্ট্রি"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/text_clipboard_info"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="শেষ ১০টা কপি করা লেখা কীবোর্ডে জমা থাকে।"
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/btn_clear_clipboard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Clear clipboard history" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="বিজয় টাইপিং — কি = d তারপর j, কে = c তারপর j, ক্ত = j তারপর g তারপর k। গ্লাইড টাইপিং এই কীবোর্ডে নেই।"
+            android:textSize="14sp" />
+
+    </LinearLayout>
+</ScrollView>
