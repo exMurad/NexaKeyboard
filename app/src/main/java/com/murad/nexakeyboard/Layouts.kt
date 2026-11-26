@@ -18,7 +18,11 @@ data class KeyDef(
     val isConsonant: Boolean = false,
     val shiftIsConsonant: Boolean = false,
     val isPreBase: Boolean = false,
-    val shiftIsPreBase: Boolean = false
+    val shiftIsPreBase: Boolean = false,
+    /** Small secondary symbol shown in the key's top corner, like
+     *  Gboard's long-press alternates (e.g. q -> 1, ক -> া). Tapping
+     *  the key types the main letter; long-press types the alternate. */
+    val alt: String? = null
 )
 
 private fun c(label: String, out: String, shiftOut: String) =
@@ -106,12 +110,106 @@ object EnglishLayout {
         s("0", "0", ")")
     )
 
+    // Gboard-like long-press alternates, shown small in the key corner.
+    private val alts = mapOf(
+        'q' to "1", 'w' to "2", 'e' to "3", 'r' to "4", 't' to "5",
+        'y' to "6", 'u' to "7", 'i' to "8", 'o' to "9", 'p' to "0",
+        'a' to "@", 's' to "#", 'd' to "$", 'f' to "%", 'g' to "&",
+        'h' to "-", 'j' to "+", 'k' to "(", 'l' to ")",
+        'z' to "*", 'x' to "\"", 'c' to "'", 'v' to ":",
+        'b' to ";", 'n' to "!", 'm' to "?"
+    )
+
     private fun letter(ch: String) =
-        KeyDef(ch, ch, ch.uppercase(), ch.uppercase())
+        KeyDef(ch, ch, ch.uppercase(), ch.uppercase(), alt = alts[ch[0]])
 
     val row1 = "qwertyuiop".map { letter(it.toString()) }
     val row2 = "asdfghjkl".map { letter(it.toString()) }
     val row3 = "zxcvbnm".map { letter(it.toString()) }
+}
+
+/**
+ * Direct Bengali layout, exactly like Gboard's Bengali keyboard
+ * (Murad's reference screenshot): the alphabet in order, not the
+ * Bijoy QWERTY mapping. Tapping a key types that Bengali letter
+ * directly. `alt` is the small secondary symbol in the key corner
+ * (long-press types it).
+ *
+ * Shift layer: vowel signs + hasanta/conjuncts + numerals + punctuation.
+ *   Shift row 1: া ি ী ু ূ ৃ ে ৈ ো ৌ  (vowel signs)
+ *   Shift row 2: ্ র্ ্য ্র ্‌ল ঁ ং ঃ ৎ ।
+ *   Shift row 3: ক্ষ জ্ঞ ত্র শ্র দ্র দ্ধ ন্ত স্ত ন্দ ঙ্ক (common conjuncts)
+ *   Shift row 4: ১ ২ ৩ ৪ ৫ ৬ ৭ ৮ ৯ ০  (numerals)
+ *   Shift row 5: ? ! , . - ৳ % ( )  (punctuation)
+ */
+object GboardBanglaLayout {
+    // Direct key: label = output = the Bengali character itself.
+    private fun b(ch: String, alt: String? = null, consonant: Boolean = false) =
+        KeyDef(ch, ch, alt = alt, isConsonant = consonant)
+
+    // Vowel sign key: ি / ে / ৈ are pre-base (see service logic).
+    private fun sign(ch: String, preBase: Boolean = false) =
+        KeyDef(ch, ch, isPreBase = preBase)
+
+    val numberRow = BijoyLayout.numberRow
+
+    val row1 = listOf(
+        b("অ", "া"), b("আ", "া"), b("ই", "ি"), b("ঈ", "ী"), b("উ", "ু"),
+        b("ঊ", "ূ"), b("এ", "ে"), b("ঐ", "ৈ"), b("ও", "ো"), b("ঔ", "ৌ")
+    )
+
+    val row2 = listOf(
+        b("ক", "া", true), b("খ", "ি", true), b("গ", "ু", true),
+        b("ঘ", "ূ", true), b("ঙ", "ং", true), b("চ", "ে", true),
+        b("ছ", "ৈ", true), b("জ", "্", true), b("ঝ", "ঁ", true),
+        b("ঞ", "্ঞ", true)
+    )
+
+    val row3 = listOf(
+        b("ট", "া", true), b("ঠ", "ি", true), b("ড", "ু", true),
+        b("ঢ", "ূ", true), b("ণ", "ণ", true), b("ত", "ে", true),
+        b("থ", "ৈ", true), b("দ", "ো", true), b("ধ", "ৌ", true),
+        b("ন", "ং", true)
+    )
+
+    val row4 = listOf(
+        b("প", "া", true), b("ফ", "ি", true), b("ব", "ু", true),
+        b("ভ", "ূ", true), b("ম", "ে", true), b("য", "ৈ", true),
+        b("র", "্র", true), b("ল", "্ল", true), b("শ", "্", true),
+        b("ষ", "ঃ", true)
+    )
+
+    val row5 = listOf(
+        b("স", "া", true), b("হ", "ি", true), b("ড়", "ু", true),
+        b("ঢ়", "ূ", true), b("য়", "ে", true), b("ৎ", "ৎ"),
+        b("ং", "ং"), b("ঃ", "ঃ")
+    )
+
+    // Shift layer — each key's output is the character itself.
+    val shiftRow1 = listOf(
+        sign("া"), sign("ি", true), sign("ী"), sign("ু"), sign("ূ"),
+        sign("ৃ"), sign("ে", true), sign("ৈ", true), sign("ো"), sign("ৌ")
+    )
+
+    val shiftRow2 = listOf(
+        sign("্"), sign("র্"), sign("্য"), sign("্র"), sign("্ল"),
+        sign("ঁ"), sign("ং"), sign("ঃ"), sign("ৎ"), sign("।")
+    )
+
+    val shiftRow3 = listOf(
+        b("ক্ষ"), b("জ্ঞ"), b("ত্র"), b("শ্র"), b("দ্র"),
+        b("দ্ধ"), b("ন্ত"), b("স্ত"), b("ন্দ"), b("ঙ্ক")
+    )
+
+    val shiftRow4 = listOf(
+        b("১"), b("২"), b("৩"), b("৪"), b("৫"),
+        b("৬"), b("৭"), b("৮"), b("৯"), b("০")
+    )
+
+    val shiftRow5 = listOf(
+        b("?"), b("!"), b(","), b("."), b("-"),
+        b("৳"), b("%"), b("(")
+    )
 }
 
 object SymbolsLayout {

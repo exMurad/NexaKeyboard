@@ -8,11 +8,14 @@ import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.inputmethodservice.InputMethodService
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
@@ -38,49 +41,35 @@ enum class Mode {
 }
 
 /**
- * NexaKeyboard — version 2.2 (Gboard-like look + Bengali keys).
+ * NexaKeyboard — version 2.3 (flat Gboard layout + direct Bengali keys).
  *
- * Keeps v1: Bangla (Bijoy) + English, numbers/symbols, emoji, a small
- * suggestion strip, and a dark/light Gboard-like theme. No glide typing.
+ * The keyboard is now FLAT like Gboard: letter keys have no grey
+ * boxes at all — just the letter on the dark (#202124) or light
+ * (#F1F3F4) background. Only the spacebar (dark grey pill) and the
+ * Enter key (blue pill) have a background. Each key also shows a
+ * small secondary symbol in its top corner, like Gboard's long-press
+ * alternates (tap = main letter, long-press = secondary symbol).
  *
- * New in v2.2:
- *  - Bangla mode shows BENGALI letters on the keys (like Gboard):
- *    the label of each key is the Bengali character it types
- *    (derived from the existing Bijoy mapping in Layouts.kt —
- *    label = output, Shift label = shiftOutput). English mode
- *    still shows English letters. Typing/output values unchanged.
- *  - Pre-base signs (ি / ে / ৈ) work BOTH ways: tapped BEFORE a
- *    consonant (Bijoy style) they are held as pending composing
- *    text and committed after the consonant; tapped AFTER a Bengali
- *    consonant (Gboard style, e.g. ক then ি) they are committed
- *    straight away — Unicode stores consonant + sign, which renders
- *    as কি / কে / কৈ.
- *  - Clipboard preview chip in the suggestion bar: when any text is
- *    copied (in any app), the strip shows a small preview (first
- *    ~20 characters) of it; tapping the chip pastes the full text.
- *    The 3 word suggestions stay beside it.
+ * Bangla (default) is now Gboard's DIRECT Bengali layout: the
+ * alphabet in order (অ আ ই ঈ উ ঊ এ ঐ ও ঔ / ক খ গ ঘ ঙ চ ছ জ ঝ ঞ /
+ * ট ঠ ড ঢ ণ ত থ দ ধ ন / প ফ ব ভ ম য র ল শ ষ / স হ ড় ঢ় য় ৎ ং ঃ),
+ * not the Bijoy QWERTY mapping. Shift shows vowel signs, hasanta /
+ * conjuncts, numerals and punctuation. The old Bijoy QWERTY layout
+ * is still available in Settings ("Bijoy QWERTY layout").
  *
- * New in v2:
- *  - Voice typing (mic key, SpeechRecognizer, bn-BD / en-US), refined
- *    by Gemini when an API key is saved, otherwise raw transcript.
- *  - Gemini API key in Settings (save / update / clear, never shown
- *    in full, test only checks it is saved).
- *  - Grammar Fix + Tone Change (Professional / Casual / Formal /
- *    Friendly, chosen in Settings) via Gemini.
- *  - Suggestion bar: Paste, Undo, Redo — order reorderable in Settings.
- *  - Clipboard history (last 10), Quick Phrases, per-language
- *    autocorrect, theme editor (colour / shape / height).
+ * Keeps v2.2: icon-only slim toolbar (reorderable/hideable),
+ * clipboard preview chip, voice typing + Gemini, Grammar Fix,
+ * Tone Change, Quick Phrases, per-language autocorrect, theme
+ * editor. No glide typing.
  *
- * Bijoy detail: ি / ে / ৈ are typed BEFORE their consonant in
- * Bijoy, but Unicode stores the consonant first. So the service
- * holds a pending pre-base sign as composing text and commits it
- * right after the next consonant (কি = d then j, কে = c then j).
- * Since v2.2 they also work the Gboard way: tapped AFTER a Bengali
- * consonant they are committed immediately (ক then ি = কি), because
- * Unicode order consonant + sign renders the same way.
- * ো forms naturally: ে + consonant + া renders as ো.
- * Reph (Shift+a = র্) is typed after the consonant it sits on,
- * which is also the Unicode order (ক + র্ + ম = কর্ম).
+ * Bijoy detail (Bijoy layout only): ি / ে / ৈ are typed BEFORE their
+ * consonant in Bijoy, but Unicode stores the consonant first. So the
+ * service holds a pending pre-base sign as composing text and commits
+ * it right after the next consonant (কি = d then j, কে = c then j).
+ * In the direct Gboard layout the signs are tapped AFTER the
+ * consonant (ক then ি = কি), because Unicode order consonant + sign
+ * renders the same way. ো forms naturally: ে + consonant + া = ো.
+ * Conjuncts: হসন্ত (্) then consonant (ক্ত = ক + ্ + ত).
  *
  * Undo/Redo limit: a stack of the last 20 edits, each a snapshot of
  * the text before the cursor (up to 500 characters). Text after the
@@ -101,10 +90,15 @@ class NexaKeyboardService : InputMethodService() {
     private var autocorrectEnglish = true
     private var toolbarOrder = SettingsStore.DEFAULT_TOOLBAR_ORDER
     private var showNumberRow = true
+    private var useBijoyLayout = false
 
     private val suggestionViews = mutableListOf<TextView>()
     private var clipboardChipView: TextView? = null
     private var clipboardFullText: String? = null
+    /** While voice typing is active, the middle suggestion shows the
+     *  live status ("🎤 শুনছি…", the partial transcript, or
+     *  "AI ঠিক করছে…") instead of word suggestions. */
+    private var voiceStatus: String? = null
     private val undoStack = ArrayDeque<String>()
     private val redoStack = ArrayDeque<String>()
     private var speechRecognizer: SpeechRecognizer? = null
@@ -123,6 +117,7 @@ class NexaKeyboardService : InputMethodService() {
     }
 
     override fun onDestroy() {
+        stopHoldRepeat()
         speechRecognizer?.destroy()
         speechRecognizer = null
         super.onDestroy()
@@ -141,6 +136,7 @@ class NexaKeyboardService : InputMethodService() {
         autocorrectEnglish = SettingsStore.autocorrectEnglish(this)
         toolbarOrder = SettingsStore.toolbarOrder(this)
         showNumberRow = SettingsStore.showNumberRow(this)
+        useBijoyLayout = SettingsStore.isBijoyLayout(this)
     }
 
     private fun toast(msg: String) {
@@ -178,7 +174,40 @@ class NexaKeyboardService : InputMethodService() {
     private fun enterTextColor() =
         if (darkTheme) Color.parseColor("#202124") else Color.WHITE
 
+    /** Muted grey for the small secondary symbol in a key's corner. */
+    private fun altTextColor() =
+        if (darkTheme) Color.parseColor("#9AA0A6") else Color.parseColor("#5F6368")
+
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    // ---------- hold-to-delete (v2.3) ----------
+
+    private val repeatHandler = Handler(Looper.getMainLooper())
+    private var repeatRunnable: Runnable? = null
+
+    /**
+     * Hold-to-delete: run the action once now, then repeat it every
+     * 60ms after a 400ms initial delay, until stopHoldRepeat() is
+     * called (finger lifted). A quick tap therefore deletes exactly
+     * one character.
+     */
+    private fun startHoldRepeat(action: () -> Unit) {
+        stopHoldRepeat()
+        action()
+        val r = object : Runnable {
+            override fun run() {
+                action()
+                repeatHandler.postDelayed(this, 60)
+            }
+        }
+        repeatRunnable = r
+        repeatHandler.postDelayed(r, 400)
+    }
+
+    private fun stopHoldRepeat() {
+        repeatRunnable?.let { repeatHandler.removeCallbacks(it) }
+        repeatRunnable = null
+    }
 
     // ---------- view building ----------
 
@@ -217,6 +246,12 @@ class NexaKeyboardService : InputMethodService() {
                     LinearLayout.LayoutParams(0, dp(36), 1f)
                 )
             }
+            // v2.3 — mic at the TOP-RIGHT of the toolbar, like Gboard
+            // (it used to sit in the bottom letter row).
+            toolbar.addView(
+                makeToolbarButton("🎤") { startVoiceTyping() },
+                LinearLayout.LayoutParams(0, dp(36), 1f)
+            )
             root.addView(toolbar)
 
             val strip = LinearLayout(this).apply {
@@ -300,6 +335,95 @@ class NexaKeyboardService : InputMethodService() {
             setOnClickListener { onClick() }
         }
 
+    /**
+     * One FLAT Gboard-style key: a vertical mini-layout with a tiny
+     * secondary symbol (9sp, muted grey) at the top-right corner and
+     * the big main letter (22sp) centred below — exactly the look
+     * Murad showed in the Gboard screenshots. The key itself has a
+     * TRANSPARENT background (no box at all); only the spacebar and
+     * Enter key get a pill background via [bg].
+     *
+     * Tap types the main letter. Long-press types the secondary
+     * symbol ([onLongClick]). If [holdRepeat] is set (Delete key),
+     * the key uses touch handling instead of a click: press deletes
+     * once, holding repeats it (see startHoldRepeat), lifting the
+     * finger stops it — so a quick tap still deletes exactly one
+     * character.
+     */
+    private fun makeKeyView(
+        label: String,
+        alt: String?,
+        weight: Float,
+        textSizeSp: Float,
+        onClick: () -> Unit,
+        onLongClick: (() -> Unit)? = null,
+        bg: GradientDrawable? = null,
+        textColorOverride: Int? = null,
+        holdRepeat: (() -> Unit)? = null
+    ): View {
+        val key = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            if (bg != null) background = bg else setBackgroundColor(Color.TRANSPARENT)
+            layoutParams = LinearLayout.LayoutParams(0, dp(keyHeightDp), weight).apply {
+                setMargins(dp(2), dp(3), dp(2), dp(3))
+            }
+            isClickable = true
+            isFocusable = false
+        }
+        val altView = TextView(this).apply {
+            text = alt ?: ""
+            textSize = 9f
+            setTextColor(altTextColor())
+            gravity = Gravity.END
+            setPadding(0, 0, dp(4), 0)
+        }
+        val mainView = TextView(this).apply {
+            text = label
+            textSize = textSizeSp
+            setTextColor(textColorOverride ?: textColor())
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, 0)
+        }
+        key.addView(
+            altView,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(11)
+            )
+        )
+        key.addView(
+            mainView,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        )
+        if (holdRepeat != null) {
+            key.setOnTouchListener { _, event ->
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        startHoldRepeat(holdRepeat)
+                        true
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        stopHoldRepeat()
+                        true
+                    }
+                    else -> true
+                }
+            }
+        } else {
+            key.setOnClickListener { onClick() }
+            if (onLongClick != null) {
+                key.setOnLongClickListener {
+                    onLongClick()
+                    true
+                }
+            }
+        }
+        return key
+    }
+
     /** Current-language label for the spacebar, Gboard-style. */
     private fun spaceLabel(): String {
         val langMode = if (mode == Mode.BANGLA || mode == Mode.ENGLISH) mode else lastLangMode
@@ -337,9 +461,8 @@ class NexaKeyboardService : InputMethodService() {
                     val def = k.def
                     // v2.2 — Bangla mode shows BENGALI letters on the
                     // keys, like Gboard: the label is the Bengali
-                    // character the key types (output / shiftOutput
-                    // from the Bijoy mapping). English mode keeps the
-                    // English letters as labels. Outputs unchanged.
+                    // character the key types (output / shiftOutput).
+                    // English mode keeps the English letters.
                     val label = if (mode == Mode.BANGLA) {
                         if (shift) def.shiftOutput ?: def.output else def.output
                     } else if (shift && def.shiftLabel != null) {
@@ -347,16 +470,62 @@ class NexaKeyboardService : InputMethodService() {
                     } else {
                         def.label
                     }
-                    row.addView(makeButton(label, 1f, false, textSizeSp, { onCharKey(def) }))
+                    // v2.3 — small secondary symbol in the key corner.
+                    // English / direct Bengali: the layout's own alt.
+                    // Bijoy: the QWERTY letter, so the user can see
+                    // which physical key types the Bengali letter —
+                    // visual hint only, so long-press is disabled there
+                    // (it must not insert a Latin letter).
+                    val alt = when {
+                        mode == Mode.ENGLISH -> def.alt
+                        mode == Mode.BANGLA && useBijoyLayout -> def.label
+                        mode == Mode.BANGLA -> def.alt
+                        else -> def.alt
+                    }
+                    val longPress: (() -> Unit)? =
+                        if (alt != null && !(mode == Mode.BANGLA && useBijoyLayout)) {
+                            { commitAlt(alt) }
+                        } else {
+                            null
+                        }
+                    row.addView(
+                        makeKeyView(label, alt, 1f, textSizeSp, { onCharKey(def) }, longPress)
+                    )
                 }
                 is UiKey.Special -> {
                     val size = when (k.type) {
                         SpecialKey.SPACE -> 13f
                         else -> 17f
                     }
-                    val isEnter = k.type == SpecialKey.ENTER
+                    // Spacebar and Enter are pills (Gboard); the other
+                    // function keys are flat, like the letter keys.
+                    val pillBg: GradientDrawable? = when (k.type) {
+                        SpecialKey.SPACE -> GradientDrawable().apply {
+                            shape = GradientDrawable.RECTANGLE
+                            cornerRadius = dp(24).toFloat()
+                            setColor(specialBg())
+                        }
+                        SpecialKey.ENTER -> GradientDrawable().apply {
+                            shape = GradientDrawable.RECTANGLE
+                            cornerRadius = dp(24).toFloat()
+                            setColor(enterBg())
+                        }
+                        else -> null
+                    }
+                    val textOverride =
+                        if (k.type == SpecialKey.ENTER) enterTextColor() else null
+                    val holdRepeat: (() -> Unit)? =
+                        if (k.type == SpecialKey.DELETE) {
+                            { onSpecialKey(SpecialKey.DELETE) }
+                        } else {
+                            null
+                        }
                     row.addView(
-                        makeButton(k.label, k.weight, true, size, { onSpecialKey(k.type) }, isEnter)
+                        makeKeyView(
+                            k.label, null, k.weight, size,
+                            { onSpecialKey(k.type) }, null,
+                            pillBg, textOverride, holdRepeat
+                        )
                     )
                 }
             }
@@ -366,6 +535,40 @@ class NexaKeyboardService : InputMethodService() {
 
     private fun addLetterRows(root: LinearLayout) {
         val isBangla = mode == Mode.BANGLA
+        if (isBangla && !useBijoyLayout) {
+            // v2.3 — Gboard direct Bengali layout (default): the
+            // alphabet in order, exactly like Murad's Gboard screenshot.
+            if (showNumberRow) {
+                addRow(root, GboardBanglaLayout.numberRow.map { UiKey.Char(it) }, 18f)
+            }
+            if (shift) {
+                // Shift layer: vowel signs, hasanta/conjuncts, numerals.
+                addRow(root, GboardBanglaLayout.shiftRow1.map { UiKey.Char(it) })
+                addRow(root, GboardBanglaLayout.shiftRow2.map { UiKey.Char(it) })
+                addRow(root, GboardBanglaLayout.shiftRow3.map { UiKey.Char(it) })
+                addRow(root, GboardBanglaLayout.shiftRow4.map { UiKey.Char(it) })
+                addRow(
+                    root,
+                    listOf(UiKey.Special(SpecialKey.SHIFT, "⇪", 1.5f)) +
+                        GboardBanglaLayout.shiftRow5.map { UiKey.Char(it) } +
+                        listOf(UiKey.Special(SpecialKey.DELETE, "⌫", 1.5f))
+                )
+            } else {
+                addRow(root, GboardBanglaLayout.row1.map { UiKey.Char(it) })
+                addRow(root, GboardBanglaLayout.row2.map { UiKey.Char(it) })
+                addRow(root, GboardBanglaLayout.row3.map { UiKey.Char(it) })
+                addRow(root, GboardBanglaLayout.row4.map { UiKey.Char(it) })
+                addRow(
+                    root,
+                    listOf(UiKey.Special(SpecialKey.SHIFT, "⇧", 1.5f)) +
+                        GboardBanglaLayout.row5.map { UiKey.Char(it) } +
+                        listOf(UiKey.Special(SpecialKey.DELETE, "⌫", 1.5f))
+                )
+            }
+            addBottomRow(root, isBangla = true)
+            return
+        }
+        // Bijoy Bangla or English — unchanged row structure.
         val numbers = if (isBangla) BijoyLayout.numberRow else EnglishLayout.numberRow
         val r1 = if (isBangla) BijoyLayout.row1 else EnglishLayout.row1
         val r2 = if (isBangla) BijoyLayout.row2 else EnglishLayout.row2
@@ -380,13 +583,21 @@ class NexaKeyboardService : InputMethodService() {
                 r3.map { UiKey.Char(it) } +
                 listOf(UiKey.Special(SpecialKey.DELETE, "⌫", 1.5f))
         )
+        addBottomRow(root, isBangla)
+    }
+
+    /**
+     * Bottom row, Gboard-style: ?123, globe (language switch), emoji,
+     * Space pill (language name), '.', blue Enter pill. The mic is NOT
+     * here any more — in v2.3 it sits at the top-right of the toolbar.
+     */
+    private fun addBottomRow(root: LinearLayout, isBangla: Boolean) {
         addRow(
             root,
             listOf(
-                UiKey.Special(SpecialKey.SYMBOLS, "?123", 1.5f),
-                UiKey.Special(SpecialKey.LANG, if (isBangla) "EN" else "বাং", 1.2f),
+                UiKey.Special(SpecialKey.SYMBOLS, if (isBangla) "?১২৩" else "?123", 1.5f),
+                UiKey.Special(SpecialKey.LANG, "🌐", 1.2f),
                 UiKey.Special(SpecialKey.EMOJI, "😀", 1.1f),
-                UiKey.Special(SpecialKey.MIC, "🎤", 1f),
                 UiKey.Special(SpecialKey.SPACE, spaceLabel(), 3f),
                 UiKey.Special(SpecialKey.DOT, if (isBangla) "।" else ".", 1f),
                 UiKey.Special(SpecialKey.ENTER, "⏎", 1.2f)
@@ -527,6 +738,60 @@ class NexaKeyboardService : InputMethodService() {
 
     // ---------- key handling ----------
 
+    /**
+     * Commit one Bengali character, honouring the pre-base rules:
+     * ি / ে / ৈ tapped AFTER a Bengali consonant commit straight away
+     * (ক then ি = কি); tapped with no consonant before the cursor they
+     * are held as pending composing text and committed after the next
+     * consonant (Bijoy style: ি then ক = কি). Used both by normal key
+     * taps and by long-press alternates.
+     */
+    private fun commitBangla(out: String, isConsonant: Boolean, isPreBase: Boolean) {
+        val ic = currentInputConnection ?: return
+        if (isPreBase) {
+            if (pendingPreBase != null) ic.commitText(pendingPreBase!!, 1)
+            pendingPreBase = null
+            val before = currentInputConnection
+                ?.getTextBeforeCursor(1, 0)?.toString()?.lastOrNull()
+            if (before != null && isBengaliConsonant(before)) {
+                ic.commitText(out, 1)
+            } else {
+                pendingPreBase = out
+                ic.setComposingText(out, 1)
+            }
+        } else if (pendingPreBase != null) {
+            val pending = pendingPreBase!!
+            pendingPreBase = null
+            if (isConsonant) {
+                ic.commitText(out + pending, 1)
+            } else {
+                ic.commitText(pending, 1)
+                ic.commitText(out, 1)
+            }
+        } else {
+            ic.commitText(out, 1)
+        }
+    }
+
+    /** Long-press a key: type its small secondary symbol. A Latin
+     *  letter in Bangla mode is only a visual hint (Bijoy QWERTY
+     *  letter), never typed. */
+    private fun commitAlt(alt: String) {
+        if (mode == Mode.BANGLA && alt.length == 1 && alt[0] in 'a'..'z') return
+        pushUndoSnapshot()
+        if (mode == Mode.BANGLA) {
+            val ch = alt.firstOrNull()
+            commitBangla(
+                alt,
+                isConsonant = ch != null && isBengaliConsonant(ch),
+                isPreBase = alt == "ি" || alt == "ে" || alt == "ৈ"
+            )
+        } else {
+            currentInputConnection?.commitText(alt, 1)
+        }
+        updateSuggestions()
+    }
+
     private fun onCharKey(def: KeyDef) {
         val ic = currentInputConnection ?: return
         pushUndoSnapshot()
@@ -535,37 +800,7 @@ class NexaKeyboardService : InputMethodService() {
         val outIsPreBase = if (shift) def.shiftIsPreBase else def.isPreBase
 
         if (mode == Mode.BANGLA) {
-            if (outIsPreBase) {
-                // v2.2 — pre-base signs (ি / ে / ৈ) work BOTH ways:
-                // (a) Gboard style: tapped AFTER a Bengali consonant,
-                //     commit immediately. Unicode stores consonant +
-                //     sign, which renders the sign before the consonant
-                //     (ক then ি -> কি, ক then ে -> কে).
-                // (b) Bijoy style: no consonant before the cursor,
-                //     hold as pending composing text and commit it
-                //     right after the next consonant (ি then ক -> কি).
-                if (pendingPreBase != null) ic.commitText(pendingPreBase!!, 1)
-                pendingPreBase = null
-                val before = currentInputConnection
-                    ?.getTextBeforeCursor(1, 0)?.toString()?.lastOrNull()
-                if (before != null && isBengaliConsonant(before)) {
-                    ic.commitText(out, 1)
-                } else {
-                    pendingPreBase = out
-                    ic.setComposingText(out, 1)
-                }
-            } else if (pendingPreBase != null) {
-                val pending = pendingPreBase!!
-                pendingPreBase = null
-                if (outIsConsonant) {
-                    ic.commitText(out + pending, 1)
-                } else {
-                    ic.commitText(pending, 1)
-                    ic.commitText(out, 1)
-                }
-            } else {
-                ic.commitText(out, 1)
-            }
+            commitBangla(out, outIsConsonant, outIsPreBase)
         } else {
             ic.commitText(out, 1)
         }
@@ -669,6 +904,7 @@ class NexaKeyboardService : InputMethodService() {
         (ch in '\u0995'..'\u09B9') || (ch in '\u09DC'..'\u09DF')
 
     private fun refreshKeyboard() {
+        stopHoldRepeat()
         setInputView(buildView())
         updateSuggestions()
     }
@@ -725,20 +961,47 @@ class NexaKeyboardService : InputMethodService() {
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
         }
         recognizer.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {}
-            override fun onBeginningOfSpeech() {}
+            override fun onReadyForSpeech(params: Bundle?) {
+                setVoiceStatus("🎤 শুনছি…")
+            }
+            override fun onBeginningOfSpeech() {
+                setVoiceStatus("🎤 শুনছি…")
+            }
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
-            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onPartialResults(partialResults: Bundle?) {
+                // Live feedback: show what the recognizer hears so far.
+                val partial = partialResults
+                    ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    ?.firstOrNull()
+                    ?.trim()
+                if (!partial.isNullOrEmpty()) {
+                    val shown = if (partial.length > 25) partial.take(25) + "…" else partial
+                    setVoiceStatus("🎤 $shown")
+                }
+            }
             override fun onEvent(eventType: Int, params: Bundle?) {}
 
             override fun onError(error: Int) {
+                setVoiceStatus(null)
                 val msg = when (error) {
                     SpeechRecognizer.ERROR_NO_MATCH,
-                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "কিছু শোনা যায়নি — আবার বলুন"
+                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
+                        "কিছু শোনা যায়নি — আবার বলুন"
                     SpeechRecognizer.ERROR_NETWORK,
-                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "ইন্টারনেট লাগবে — ভয়েস টাইপিং ব্যর্থ হয়েছে"
+                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT ->
+                        "ইন্টারনেট লাগবে — ভয়েস টাইপিং ব্যর্থ হয়েছে"
+                    SpeechRecognizer.ERROR_AUDIO ->
+                        "মাইক পাওয়া যাচ্ছে না — মাইক চেক করুন"
+                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
+                        "মাইক্রোফোনের অনুমতি দিন — সেটিংসে গিয়ে অনুমতি দিন"
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
+                        "ভয়েস টাইপিং ব্যস্ত — একটু পরে আবার চেষ্টা করুন"
+                    SpeechRecognizer.ERROR_SERVER ->
+                        "ভয়েস সার্ভারে সমস্যা — আবার চেষ্টা করুন"
+                    SpeechRecognizer.ERROR_CLIENT ->
+                        "ভয়েস টাইপিং বন্ধ হয়ে গেছে — আবার চেষ্টা করুন"
                     else -> "ভয়েস টাইপিং ব্যর্থ হয়েছে — আবার চেষ্টা করুন"
                 }
                 toast(msg)
@@ -754,29 +1017,43 @@ class NexaKeyboardService : InputMethodService() {
                 recognizer.destroy()
                 if (speechRecognizer == recognizer) speechRecognizer = null
                 if (raw.isNullOrEmpty()) {
+                    setVoiceStatus(null)
                     toast("কিছু শোনা যায়নি — আবার বলুন")
                     return
                 }
                 val key = SettingsStore.geminiKey(this@NexaKeyboardService)
                 if (key.isBlank()) {
+                    setVoiceStatus(null)
                     pushUndoSnapshot()
                     currentInputConnection?.commitText("$raw ", 1)
                     updateSuggestions()
                     return
                 }
-                GeminiClient.refineVoiceText(raw, key) { refined ->
+                // Show that Gemini is working on the transcript, so the
+                // user knows it is not stuck.
+                setVoiceStatus("AI ঠিক করছে…")
+                GeminiClient.refineVoiceTextDetailed(raw, key) { result ->
+                    setVoiceStatus(null)
                     pushUndoSnapshot()
-                    val text = refined ?: raw
-                    if (refined == null) toast("AI রিফাইন ব্যর্থ হয়েছে — আসল লেখাটাই বসানো হলো")
-                    currentInputConnection?.commitText("$text ", 1)
+                    when (result) {
+                        is GeminiClient.GeminiResult.Ok -> {
+                            currentInputConnection?.commitText("${result.text} ", 1)
+                        }
+                        is GeminiClient.GeminiResult.Fail -> {
+                            currentInputConnection?.commitText("$raw ", 1)
+                            toast("AI রিফাইন ব্যর্থ হয়েছে — আসল লেখাটাই বসানো হলো (${result.reason})")
+                        }
+                    }
                     updateSuggestions()
                 }
             }
         })
         try {
             recognizer.startListening(intent)
+            setVoiceStatus("🎤 শুনছি…")
             toast("বলুন…")
         } catch (e: Exception) {
+            setVoiceStatus(null)
             toast("ভয়েস টাইপিং শুরু করা যায়নি")
         }
     }
@@ -852,6 +1129,15 @@ class NexaKeyboardService : InputMethodService() {
     }
 
     private fun updateSuggestions() {
+        // Voice typing in progress: show its live status in the middle
+        // of the suggestion strip instead of word suggestions.
+        if (voiceStatus != null) {
+            suggestionViews.getOrNull(0)?.text = ""
+            suggestionViews.getOrNull(1)?.text = voiceStatus
+            suggestionViews.getOrNull(2)?.text = ""
+            updateClipboardChip()
+            return
+        }
         val isBangla = mode == Mode.BANGLA
         val enabled = if (isBangla) autocorrectBangla else autocorrectEnglish
         val word = currentWord()
@@ -864,6 +1150,18 @@ class NexaKeyboardService : InputMethodService() {
             suggestionViews[i].text = list.getOrNull(i) ?: ""
         }
         updateClipboardChip()
+    }
+
+    /** Show (or clear) the voice-typing status in the suggestion strip. */
+    private fun setVoiceStatus(text: String?) {
+        voiceStatus = text
+        if (text != null) {
+            suggestionViews.getOrNull(0)?.text = ""
+            suggestionViews.getOrNull(1)?.text = text
+            suggestionViews.getOrNull(2)?.text = ""
+        } else {
+            updateSuggestions()
+        }
     }
 
     /**

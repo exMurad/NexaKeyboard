@@ -56,14 +56,6 @@ class MainActivity : AppCompatActivity() {
 
         // ---------- 2. Gemini API key ----------
         val editKey = findViewById<EditText>(R.id.edit_api_key)
-        val status = findViewById<TextView>(R.id.text_key_status)
-        fun refreshKeyStatus() {
-            status.text = if (SettingsStore.hasGeminiKey(this)) {
-                "API key: saved"
-            } else {
-                "API key: not set"
-            }
-        }
         refreshKeyStatus()
 
         findViewById<Button>(R.id.btn_save_key).setOnClickListener {
@@ -75,24 +67,47 @@ class MainActivity : AppCompatActivity() {
             SettingsStore.saveGeminiKey(this, key)
             editKey.text.clear()
             refreshKeyStatus()
-            Toast.makeText(this, "Gemini API key saved", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Gemini API key saved ✓", Toast.LENGTH_SHORT).show()
         }
         findViewById<Button>(R.id.btn_clear_key).setOnClickListener {
             SettingsStore.clearGeminiKey(this)
             editKey.text.clear()
             refreshKeyStatus()
-            Toast.makeText(this, "Gemini API key cleared", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "API key removed", Toast.LENGTH_SHORT).show()
         }
-        // Test only checks a key is saved locally. No network call.
-        findViewById<Button>(R.id.btn_test_key).setOnClickListener {
-            if (SettingsStore.hasGeminiKey(this)) {
-                Toast.makeText(
-                    this,
-                    "Key saved — will be used for AI refine",
-                    Toast.LENGTH_SHORT
-                ).show()
-            } else {
+        // v2.3 — Test now REALLY calls Gemini ("Say OK") and shows the
+        // result. The button is disabled and the status shows
+        // "Testing…" while the call runs, so the user is never left
+        // with no result.
+        val btnTest = findViewById<Button>(R.id.btn_test_key)
+        val statusView = findViewById<TextView>(R.id.text_key_status)
+        btnTest.setOnClickListener {
+            val key = SettingsStore.geminiKey(this)
+            if (key.isBlank()) {
                 Toast.makeText(this, "No API key saved yet", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            btnTest.isEnabled = false
+            statusView.text = "Testing… — Gemini-কে ডাকা হচ্ছে…"
+            GeminiClient.testKey(key) { result ->
+                btnTest.isEnabled = true
+                when (result) {
+                    is GeminiClient.GeminiResult.Ok -> {
+                        val reply = result.text.take(40)
+                        statusView.text = "Test passed ✓ — Gemini is working (উত্তর: $reply)"
+                        Toast.makeText(
+                            this, "Test passed ✓ — Gemini is working",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    is GeminiClient.GeminiResult.Fail -> {
+                        statusView.text = "Test failed: ${result.reason}"
+                        Toast.makeText(
+                            this, "Test failed: ${result.reason}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
             }
         }
 
@@ -120,6 +135,18 @@ class MainActivity : AppCompatActivity() {
         }
         swEn.setOnCheckedChangeListener { _, checked ->
             SettingsStore.prefs(this).edit().putBoolean("autocorrect_english", checked).apply()
+        }
+
+        // ---------- Bangla layout: Gboard direct (default) or Bijoy ----------
+        val layoutGroup = findViewById<RadioGroup>(R.id.radio_bangla_layout)
+        val layoutToId = mapOf(
+            "gboard" to R.id.radio_layout_gboard,
+            "bijoy" to R.id.radio_layout_bijoy
+        )
+        layoutGroup.check(layoutToId[SettingsStore.banglaLayout(this)] ?: R.id.radio_layout_gboard)
+        layoutGroup.setOnCheckedChangeListener { _, checkedId ->
+            val v = layoutToId.entries.firstOrNull { it.value == checkedId }?.key ?: "gboard"
+            SettingsStore.prefs(this).edit().putString("bangla_layout", v).apply()
         }
 
         // ---------- 5. Theme editor ----------
@@ -198,9 +225,25 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        refreshKeyStatus()
         refreshToolbarOrder()
         refreshPhrases()
         refreshClipboardInfo()
+    }
+
+    /**
+     * v2.3 — the status line always shows the real state, big and
+     * visible: "API key: saved ✓ (…last 4 characters)" — the full key
+     * is never shown — or "API key: not set".
+     */
+    private fun refreshKeyStatus() {
+        val status = findViewById<TextView>(R.id.text_key_status)
+        val key = SettingsStore.geminiKey(this)
+        status.text = if (key.isNotBlank()) {
+            "API key: saved ✓ (…${key.takeLast(4)})"
+        } else {
+            "API key: not set"
+        }
     }
 
     private fun refreshClipboardInfo() {

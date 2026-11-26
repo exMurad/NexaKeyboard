@@ -18,8 +18,12 @@ import java.net.URL
  *
  * All calls run on a background thread. Callbacks are posted to the main
  * thread, so callers can safely insert text / show a Toast in them.
- * On any failure the callback receives null and the caller should fall
- * back to the original text.
+ *
+ * v2.3 — errors are no longer swallowed: every call returns a
+ * GeminiResult (Ok with the text, or Fail with a plain-language
+ * reason: "Invalid API key", "No internet", "Quota exceeded", ...).
+ * The old (String?) callbacks are kept for existing callers and
+ * simply receive null on failure.
  */
 object GeminiClient {
 
@@ -28,6 +32,17 @@ object GeminiClient {
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    /** Result of a Gemini call: the text, or a plain-language reason. */
+    sealed class GeminiResult {
+        data class Ok(val text: String) : GeminiResult()
+        data class Fail(val reason: String) : GeminiResult()
+    }
+
+    /** Real connectivity test: asks Gemini to "Say OK". */
+    fun testKey(apiKey: String, callback: (GeminiResult) -> Unit) {
+        generateDetailed("Say OK", apiKey, callback)
+    }
+
     fun refineVoiceText(raw: String, apiKey: String, callback: (String?) -> Unit) {
         val prompt = "You are cleaning up a voice-typing transcript. " +
             "Fix spelling and punctuation, drop filler words like 'um', 'uh' and " +
@@ -35,6 +50,20 @@ object GeminiClient {
             "the refined text, with no explanation and no quotes around it.\n\n" +
             "Transcript:\n$raw"
         generate(prompt, apiKey, callback)
+    }
+
+    /** Same as refineVoiceText, but the callback also gets the failure reason. */
+    fun refineVoiceTextDetailed(
+        raw: String,
+        apiKey: String,
+        callback: (GeminiResult) -> Unit
+    ) {
+        val prompt = "You are cleaning up a voice-typing transcript. " +
+            "Fix spelling and punctuation, drop filler words like 'um', 'uh' and " +
+            "repeated self-corrections, keep the meaning exactly, and return ONLY " +
+            "the refined text, with no explanation and no quotes around it.\n\n" +
+            "Transcript:\n$raw"
+        generateDetailed(prompt, apiKey, callback)
     }
 
     fun fixGrammar(text: String, apiKey: String, callback: (String?) -> Unit) {
@@ -50,17 +79,45 @@ object GeminiClient {
     }
 
     fun generate(prompt: String, apiKey: String, callback: (String?) -> Unit) {
+        generateDetailed(prompt, apiKey) { result ->
+            callback(if (result is GeminiResult.Ok) result.text else null)
+        }
+    }
+
+    /** Full-result version: the callback always gets Ok or Fail. */
+    fun generateDetailed(prompt: String, apiKey: String, callback: (GeminiResult) -> Unit) {
         Thread {
             val result = try {
                 post(prompt, apiKey)
+            } catch (e: java.net.UnknownHostException) {
+                GeminiResult.Fail("No internet — check connection")
+            } catch (e: java.net.SocketTimeoutException) {
+                GeminiResult.Fail("No internet — connection timed out")
+            } catch (e: java.io.IOException) {
+                GeminiResult.Fail("No internet — ${e.message ?: "network error"}")
             } catch (e: Exception) {
-                null
+                GeminiResult.Fail("Gemini error: ${e.message ?: "unknown error"}")
             }
             mainHandler.post { callback(result) }
         }.start()
     }
 
-    private fun post(prompt: String, apiKey: String): String? {
+    /** Turn an HTTP error into a plain-language reason. */
+    private fun httpError(code: Int, body: String): String {
+        val msg = try {
+            JSONObject(body).optJSONObject("error")?.optString("message") ?: ""
+        } catch (e: Exception) {
+            ""
+        }
+        val detail = if (msg.isNotEmpty()) " — ${msg.take(100)}" else ""
+        return when (code) {
+            400, 401, 403 -> "Invalid API key$detail"
+            429 -> "Quota exceeded — try again later"
+            else -> "Gemini error ($code)$detail"
+        }
+    }
+
+    private fun post(prompt: String, apiKey: String): GeminiResult {
         val url = URL(URL_STRING)
         val conn = url.openConnection() as HttpURLConnection
         try {
@@ -83,8 +140,9 @@ object GeminiClient {
 
             val code = conn.responseCode
             val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            val response = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: return null
-            if (code !in 200..299) return null
+            val response = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                ?: return GeminiResult.Fail("Gemini error ($code): empty response")
+            if (code !in 200..299) return GeminiResult.Fail(httpError(code, response))
 
             val root = JSONObject(response)
             val text = root
@@ -94,7 +152,9 @@ object GeminiClient {
                 ?.optJSONArray("parts")
                 ?.optJSONObject(0)
                 ?.optString("text")
-            return text?.trim()?.takeIf { it.isNotEmpty() }
+            val clean = text?.trim()?.takeIf { it.isNotEmpty() }
+            return if (clean != null) GeminiResult.Ok(clean)
+            else GeminiResult.Fail("Gemini error: empty reply")
         } finally {
             conn.disconnect()
         }

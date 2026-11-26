@@ -20,6 +20,9 @@ import org.json.JSONArray
  *  key_shape           String: "rounded" | "square", default "rounded"
  *  keyboard_height     String: "short" | "medium" | "tall", default "medium"
  *  number_row          Boolean, default true (show the Bangla/English number row)
+ *  bangla_layout       String: "gboard" | "bijoy", default "gboard"
+ *                      (Gboard = direct Bengali alphabet layout;
+ *                       Bijoy = old QWERTY mapping with English-letter keys)
  *  tone                String: "Professional" | "Casual" | "Formal" | "Friendly"
  *  quick_phrases       String, JSON array of strings
  *  clipboard_history   String, JSON array of strings (last 10)
@@ -98,6 +101,12 @@ object SettingsStore {
 
     fun showNumberRow(context: Context): Boolean =
         prefs(context).getBoolean("number_row", true)
+
+    /** Bangla layout: "gboard" (direct Bengali alphabet, default) or "bijoy". */
+    fun banglaLayout(context: Context): String =
+        prefs(context).getString("bangla_layout", "gboard") ?: "gboard"
+
+    fun isBijoyLayout(context: Context): Boolean = banglaLayout(context) == "bijoy"
 
     fun tone(context: Context): String =
         prefs(context).getString("tone", "Professional") ?: "Professional"

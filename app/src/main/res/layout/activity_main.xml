@@ -20,7 +20,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="বাংলা (বিজয়) + ইংরেজি কীবোর্ড — দ্বিতীয় সংস্করণ (v2)"
+            android:text="Gboard-ধাঁচের বাংলা + ইংরেজি কীবোর্ড — সংস্করণ v2.3"
             android:textSize="15sp" />
 
         <!-- 1. Enable -->
@@ -114,7 +114,8 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:text="API key: not set"
-            android:textSize="15sp" />
+            android:textSize="18sp"
+            android:textStyle="bold" />
 
         <!-- 3. Tone -->
         <TextView
@@ -177,6 +178,42 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Autocorrect English (ডিফল্ট: চালু)" />
+
+        <!-- Bangla layout: Gboard direct (default) or Bijoy QWERTY -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="বাংলা লেআউট"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Gboard: সরাসরি বাংলা বর্ণমালা (অ আ ই … ক খ গ …), কি-তে বাংলা অক্ষর। Bijoy: পুরনো QWERTY ম্যাপিং, ইংরেজি কি-তে বাংলা টাইপ।"
+            android:textSize="14sp" />
+
+        <RadioGroup
+            android:id="@+id/radio_bangla_layout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="vertical">
+
+            <RadioButton
+                android:id="@+id/radio_layout_gboard"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Gboard (সরাসরি বাংলা অক্ষর — ডিফল্ট)" />
+
+            <RadioButton
+                android:id="@+id/radio_layout_bijoy"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Bijoy QWERTY" />
+        </RadioGroup>
 
         <!-- 5. Theme editor -->
         <TextView
