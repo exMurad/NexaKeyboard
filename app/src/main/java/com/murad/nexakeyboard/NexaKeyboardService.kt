@@ -347,7 +347,7 @@ class NexaKeyboardService : InputMethodService() {
                     } else {
                         def.label
                     }
-                    row.addView(makeButton(label, 1f, false, textSizeSp) { onCharKey(def) })
+                    row.addView(makeButton(label, 1f, false, textSizeSp, { onCharKey(def) }))
                 }
                 is UiKey.Special -> {
                     val size = when (k.type) {
@@ -443,13 +443,13 @@ class NexaKeyboardService : InputMethodService() {
         }
         for (item in items) {
             val label = if (item.length > 32) item.take(30) + "…" else item
-            root.addView(makeButton(label, 1f, false, 15f) {
+            root.addView(makeButton(label, 1f, false, 15f, {
                 pushUndoSnapshot()
                 currentInputConnection?.commitText(item, 1)
                 SettingsStore.addClipboardItem(this, item)
                 mode = lastLangMode
                 refreshKeyboard()
-            })
+            }))
         }
         addRow(
             root,
@@ -464,12 +464,12 @@ class NexaKeyboardService : InputMethodService() {
     private fun addPhraseRows(root: LinearLayout) {
         val phrases = SettingsStore.quickPhrases(this)
         for (phrase in phrases) {
-            root.addView(makeButton(phrase, 1f, false, 16f) {
+            root.addView(makeButton(phrase, 1f, false, 16f, {
                 pushUndoSnapshot()
                 currentInputConnection?.commitText("$phrase ", 1)
                 mode = lastLangMode
                 refreshKeyboard()
-            })
+            }))
         }
         addRow(
             root,
