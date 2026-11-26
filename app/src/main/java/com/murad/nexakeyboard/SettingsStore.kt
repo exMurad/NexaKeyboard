@@ -10,13 +10,16 @@ import org.json.JSONArray
  *
  * Keys:
  *  gemini_api_key      String, empty = not set
- *  toolbar_order       String, comma list, e.g. "paste,undo,redo"
+ *  toolbar_order       String, comma list of VISIBLE toolbar item keys,
+ *                      e.g. "grammar,tone,clipboard,phrases,paste,undo,redo";
+ *                      hidden items are not in the list (default: all visible)
  *  autocorrect_bangla  Boolean, default false
  *  autocorrect_english Boolean, default true
  *  dark_theme          Boolean, default true
  *  key_colour          String: "grey" | "dark" | "blue", default "grey"
  *  key_shape           String: "rounded" | "square", default "rounded"
  *  keyboard_height     String: "short" | "medium" | "tall", default "medium"
+ *  number_row          Boolean, default true (show the Bangla/English number row)
  *  tone                String: "Professional" | "Casual" | "Formal" | "Friendly"
  *  quick_phrases       String, JSON array of strings
  *  clipboard_history   String, JSON array of strings (last 10)
@@ -25,7 +28,12 @@ object SettingsStore {
 
     const val PREFS = "nexa_prefs"
 
-    val DEFAULT_TOOLBAR_ORDER = listOf("paste", "undo", "redo")
+    // Toolbar: the ordered list of VISIBLE toolbar items. Hidden items
+    // are simply not in the list; Settings shows all items with a
+    // show/hide checkbox so a hidden one can be brought back.
+    // Keys: grammar, tone, clipboard, phrases, paste, undo, redo, settings.
+    val TOOLBAR_ITEMS = listOf("grammar", "tone", "clipboard", "phrases", "paste", "undo", "redo", "settings")
+    val DEFAULT_TOOLBAR_ORDER = TOOLBAR_ITEMS
     val DEFAULT_PHRASES = listOf("ছয়গাঁও ফার্মেসি", "ধন্যবাদ", "আসসালামু আলাইকুম")
     val TONES = listOf("Professional", "Casual", "Formal", "Friendly")
     val KEY_COLOURS = listOf("grey", "dark", "blue")
@@ -52,10 +60,18 @@ object SettingsStore {
         val raw = prefs(context).getString("toolbar_order", null) ?: return DEFAULT_TOOLBAR_ORDER
         val list = raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }
         if (list.isEmpty()) return DEFAULT_TOOLBAR_ORDER
-        // Keep the three known items, in saved order, then any missing one at the end.
-        val known = DEFAULT_TOOLBAR_ORDER
-        val ordered = list.filter { it in known } + known.filter { it !in list }
-        return ordered
+        val known = TOOLBAR_ITEMS
+        val ordered = list.filter { it in known }
+        if (ordered.isEmpty()) return DEFAULT_TOOLBAR_ORDER
+        // Migration from v2: the old saved list only had paste/undo/redo.
+        // Keep that order, and put the four newer items before it so
+        // nothing disappears for existing users.
+        val oldOnly = ordered.all { it in listOf("paste", "undo", "redo") }
+        return if (oldOnly) {
+            listOf("grammar", "tone", "clipboard", "phrases") + ordered
+        } else {
+            ordered + known.filter { it !in ordered }
+        }
     }
 
     fun saveToolbarOrder(context: Context, order: List<String>) {
@@ -79,6 +95,9 @@ object SettingsStore {
 
     fun keyboardHeight(context: Context): String =
         prefs(context).getString("keyboard_height", "medium") ?: "medium"
+
+    fun showNumberRow(context: Context): Boolean =
+        prefs(context).getBoolean("number_row", true)
 
     fun tone(context: Context): String =
         prefs(context).getString("tone", "Professional") ?: "Professional"

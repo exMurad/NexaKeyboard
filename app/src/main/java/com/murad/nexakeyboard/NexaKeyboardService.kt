@@ -30,7 +30,7 @@ sealed class UiKey {
 
 enum class SpecialKey {
     SHIFT, DELETE, LANG, SYMBOLS, ABC, EMOJI, SPACE, ENTER, DOT,
-    MIC, GRAMMAR, TONE, PASTE, UNDO, REDO, CLIPBOARD, PHRASES
+    MIC, GRAMMAR, TONE, PASTE, UNDO, REDO, CLIPBOARD, PHRASES, SETTINGS
 }
 
 enum class Mode {
@@ -38,10 +38,27 @@ enum class Mode {
 }
 
 /**
- * NexaKeyboard — second version (v2).
+ * NexaKeyboard — version 2.2 (Gboard-like look + Bengali keys).
  *
  * Keeps v1: Bangla (Bijoy) + English, numbers/symbols, emoji, a small
  * suggestion strip, and a dark/light Gboard-like theme. No glide typing.
+ *
+ * New in v2.2:
+ *  - Bangla mode shows BENGALI letters on the keys (like Gboard):
+ *    the label of each key is the Bengali character it types
+ *    (derived from the existing Bijoy mapping in Layouts.kt —
+ *    label = output, Shift label = shiftOutput). English mode
+ *    still shows English letters. Typing/output values unchanged.
+ *  - Pre-base signs (ি / ে / ৈ) work BOTH ways: tapped BEFORE a
+ *    consonant (Bijoy style) they are held as pending composing
+ *    text and committed after the consonant; tapped AFTER a Bengali
+ *    consonant (Gboard style, e.g. ক then ি) they are committed
+ *    straight away — Unicode stores consonant + sign, which renders
+ *    as কি / কে / কৈ.
+ *  - Clipboard preview chip in the suggestion bar: when any text is
+ *    copied (in any app), the strip shows a small preview (first
+ *    ~20 characters) of it; tapping the chip pastes the full text.
+ *    The 3 word suggestions stay beside it.
  *
  * New in v2:
  *  - Voice typing (mic key, SpeechRecognizer, bn-BD / en-US), refined
@@ -58,6 +75,9 @@ enum class Mode {
  * Bijoy, but Unicode stores the consonant first. So the service
  * holds a pending pre-base sign as composing text and commits it
  * right after the next consonant (কি = d then j, কে = c then j).
+ * Since v2.2 they also work the Gboard way: tapped AFTER a Bengali
+ * consonant they are committed immediately (ক then ি = কি), because
+ * Unicode order consonant + sign renders the same way.
  * ো forms naturally: ে + consonant + া renders as ো.
  * Reph (Shift+a = র্) is typed after the consonant it sits on,
  * which is also the Unicode order (ক + র্ + ম = কর্ম).
@@ -80,8 +100,11 @@ class NexaKeyboardService : InputMethodService() {
     private var autocorrectBangla = false
     private var autocorrectEnglish = true
     private var toolbarOrder = SettingsStore.DEFAULT_TOOLBAR_ORDER
+    private var showNumberRow = true
 
     private val suggestionViews = mutableListOf<TextView>()
+    private var clipboardChipView: TextView? = null
+    private var clipboardFullText: String? = null
     private val undoStack = ArrayDeque<String>()
     private val redoStack = ArrayDeque<String>()
     private var speechRecognizer: SpeechRecognizer? = null
@@ -117,31 +140,43 @@ class NexaKeyboardService : InputMethodService() {
         autocorrectBangla = SettingsStore.autocorrectBangla(this)
         autocorrectEnglish = SettingsStore.autocorrectEnglish(this)
         toolbarOrder = SettingsStore.toolbarOrder(this)
+        showNumberRow = SettingsStore.showNumberRow(this)
     }
 
     private fun toast(msg: String) {
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
 
-    // ---------- colours / theme ----------
+    // ---------- colours / theme (Gboard-like, v2.1) ----------
 
     private fun bgColor() =
-        if (darkTheme) Color.parseColor("#1C1C1E") else Color.parseColor("#D1D5DB")
+        if (darkTheme) Color.parseColor("#202124") else Color.parseColor("#F1F3F4")
 
     private fun keyBg(): Int {
         return when (keyColour) {
-            "dark" -> if (darkTheme) Color.parseColor("#2E2E2E") else Color.parseColor("#D0D0D0")
+            "dark" -> if (darkTheme) Color.parseColor("#3C4043") else Color.parseColor("#D0D0D0")
             "blue" -> if (darkTheme) Color.parseColor("#2B4A6F") else Color.parseColor("#D6E4F0")
-            else -> if (darkTheme) Color.parseColor("#3A3A3C") else Color.parseColor("#ECECEC")
+            // Gboard default grey.
+            else -> if (darkTheme) Color.parseColor("#303134") else Color.parseColor("#FFFFFF")
         }
     }
 
     private fun specialBg() =
-        if (darkTheme) Color.parseColor("#48484A") else Color.parseColor("#B9BEC6")
+        if (darkTheme) Color.parseColor("#5F6368") else Color.parseColor("#DADCE0")
 
-    private fun textColor() = if (darkTheme) Color.WHITE else Color.BLACK
+    private fun textColor() =
+        if (darkTheme) Color.parseColor("#E8EAED") else Color.parseColor("#202124")
 
-    private fun accentColor() = Color.parseColor("#2FA84F")
+    /** Gboard blue for suggestion text. */
+    private fun suggestionColor() =
+        if (darkTheme) Color.parseColor("#8AB4F8") else Color.parseColor("#1A73E8")
+
+    /** Gboard blue Enter key. */
+    private fun enterBg() =
+        if (darkTheme) Color.parseColor("#8AB4F8") else Color.parseColor("#1A73E8")
+
+    private fun enterTextColor() =
+        if (darkTheme) Color.parseColor("#202124") else Color.WHITE
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
@@ -149,59 +184,85 @@ class NexaKeyboardService : InputMethodService() {
 
     private fun buildView(): View {
         suggestionViews.clear()
+        clipboardChipView = null
+        clipboardFullText = null
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(bgColor())
-            setPadding(dp(2), dp(4), dp(2), dp(4))
+            setPadding(dp(4), dp(6), dp(4), dp(6))
         }
 
-        // AI toolbar row: Grammar Fix, Tone, Clipboard, Phrases.
+        // One slim Gboard-like toolbar row (36dp, flat, no grey key boxes),
+        // icon-only so 5-6 items fit in one row. Only the visible items,
+        // in the saved order from Settings, are rendered here.
         if (mode == Mode.BANGLA || mode == Mode.ENGLISH) {
-            val aiRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            val aiButtons = listOf(
-                UiKey.Special(SpecialKey.GRAMMAR, "AI ✎", 1f),
-                UiKey.Special(SpecialKey.TONE, "Tone", 1f),
-                UiKey.Special(SpecialKey.CLIPBOARD, "📋", 1f),
-                UiKey.Special(SpecialKey.PHRASES, "Phrases", 1f)
-            )
-            for (k in aiButtons) {
-                aiRow.addView(
-                    makeButton(k.label, k.weight, true, 15f) { onSpecialKey(k.type) },
-                    LinearLayout.LayoutParams(0, dp(40), k.weight)
+            val toolbar = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setBackgroundColor(bgColor())
+            }
+            for (item in toolbarOrder) {
+                val (label, type) = when (item) {
+                    "grammar" -> "✎" to SpecialKey.GRAMMAR
+                    "tone" -> "🎭" to SpecialKey.TONE
+                    "clipboard" -> "📋" to SpecialKey.CLIPBOARD
+                    "phrases" -> "💬" to SpecialKey.PHRASES
+                    "paste" -> "📥" to SpecialKey.PASTE
+                    "undo" -> "↩" to SpecialKey.UNDO
+                    "redo" -> "↪" to SpecialKey.REDO
+                    "settings" -> "⚙️" to SpecialKey.SETTINGS
+                    else -> continue
+                }
+                toolbar.addView(
+                    makeToolbarButton(label) { onSpecialKey(type) },
+                    LinearLayout.LayoutParams(0, dp(36), 1f)
                 )
             }
-            root.addView(aiRow)
-        }
+            root.addView(toolbar)
 
-        // Suggestion strip + Paste / Undo / Redo in the saved order.
-        val strip = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-        for (item in toolbarOrder) {
-            val (label, type) = when (item) {
-                "paste" -> "Paste" to SpecialKey.PASTE
-                "undo" -> "↩ Undo" to SpecialKey.UNDO
-                "redo" -> "↪ Redo" to SpecialKey.REDO
-                else -> continue
-            }
-            val btn = makeButton(label, 0.9f, true, 14f) { onSpecialKey(type) }
-            strip.addView(btn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 0.9f))
-        }
-        repeat(3) {
-            val tv = TextView(this).apply {
+            val strip = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
-                textSize = 16f
-                setTextColor(accentColor())
-                setPadding(dp(4), dp(6), dp(4), dp(6))
-                setOnClickListener { onSuggestionClicked(text.toString()) }
             }
-            suggestionViews.add(tv)
+            // Clipboard preview chip (v2.2): first item of the strip.
+            // Shows a short preview of whatever text is on the system
+            // clipboard; tapping it pastes the full text. Hidden when
+            // the clipboard is empty — the word suggestions stay.
+            val chip = TextView(this).apply {
+                gravity = Gravity.CENTER
+                textSize = 14f
+                setTextColor(suggestionColor())
+                setPadding(dp(8), dp(6), dp(8), dp(6))
+                isSingleLine = true
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = dp(12).toFloat()
+                    setColor(specialBg())
+                }
+                visibility = View.GONE
+                setOnClickListener { onClipboardChipClicked() }
+            }
+            clipboardChipView = chip
             strip.addView(
-                tv,
-                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                chip,
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.2f)
             )
+            repeat(3) {
+                val tv = TextView(this).apply {
+                    gravity = Gravity.CENTER
+                    textSize = 16f
+                    setTextColor(suggestionColor())
+                    setPadding(dp(4), dp(6), dp(4), dp(6))
+                    setOnClickListener { onSuggestionClicked(text.toString()) }
+                }
+                suggestionViews.add(tv)
+                strip.addView(
+                    tv,
+                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                )
+            }
+            root.addView(strip)
         }
-        root.addView(strip)
 
         when (mode) {
             Mode.BANGLA, Mode.ENGLISH -> addLetterRows(root)
@@ -213,34 +274,60 @@ class NexaKeyboardService : InputMethodService() {
         return root
     }
 
-    private fun keyBackground(isSpecial: Boolean): GradientDrawable =
+    private fun keyBackground(isSpecial: Boolean, isEnter: Boolean = false): GradientDrawable =
         GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            cornerRadius = if (keyShape == "square") 0f else dp(6).toFloat()
-            setColor(if (isSpecial) specialBg() else keyBg())
+            cornerRadius = if (keyShape == "square") 0f else dp(10).toFloat()
+            setColor(
+                when {
+                    isEnter -> enterBg()
+                    isSpecial -> specialBg()
+                    else -> keyBg()
+                }
+            )
         }
+
+    /** Flat toolbar button: same background as the keyboard, no key box. */
+    private fun makeToolbarButton(label: String, onClick: () -> Unit): Button =
+        Button(this).apply {
+            text = label
+            textSize = 15f
+            isAllCaps = false
+            minimumHeight = 0
+            setTextColor(textColor())
+            setBackgroundColor(Color.TRANSPARENT)
+            setPadding(0, 0, 0, 0)
+            setOnClickListener { onClick() }
+        }
+
+    /** Current-language label for the spacebar, Gboard-style. */
+    private fun spaceLabel(): String {
+        val langMode = if (mode == Mode.BANGLA || mode == Mode.ENGLISH) mode else lastLangMode
+        return if (langMode == Mode.BANGLA) "বাংলা" else "English"
+    }
 
     private fun makeButton(
         label: String,
         weight: Float,
         isSpecial: Boolean,
         textSizeSp: Float,
-        onClick: () -> Unit
+        onClick: () -> Unit,
+        isEnter: Boolean = false
     ): Button = Button(this).apply {
         text = label
         textSize = textSizeSp
         isAllCaps = false
         minimumHeight = 0
-        setTextColor(textColor())
-        background = keyBackground(isSpecial)
+        setTextColor(if (isEnter) enterTextColor() else textColor())
+        background = keyBackground(isSpecial, isEnter)
         setPadding(0, 0, 0, 0)
         layoutParams = LinearLayout.LayoutParams(0, dp(keyHeightDp), weight).apply {
-            setMargins(dp(2), dp(3), dp(2), dp(3))
+            setMargins(dp(3), dp(5), dp(3), dp(5))
         }
         setOnClickListener { onClick() }
     }
 
-    private fun addRow(root: LinearLayout, keys: List<UiKey>) {
+    private fun addRow(root: LinearLayout, keys: List<UiKey>, textSizeSp: Float = 22f) {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
         }
@@ -248,12 +335,29 @@ class NexaKeyboardService : InputMethodService() {
             when (k) {
                 is UiKey.Char -> {
                     val def = k.def
-                    val label = if (shift && def.shiftLabel != null) def.shiftLabel else def.label
-                    row.addView(makeButton(label, 1f, false, 20f) { onCharKey(def) })
+                    // v2.2 — Bangla mode shows BENGALI letters on the
+                    // keys, like Gboard: the label is the Bengali
+                    // character the key types (output / shiftOutput
+                    // from the Bijoy mapping). English mode keeps the
+                    // English letters as labels. Outputs unchanged.
+                    val label = if (mode == Mode.BANGLA) {
+                        if (shift) def.shiftOutput ?: def.output else def.output
+                    } else if (shift && def.shiftLabel != null) {
+                        def.shiftLabel
+                    } else {
+                        def.label
+                    }
+                    row.addView(makeButton(label, 1f, false, textSizeSp) { onCharKey(def) })
                 }
                 is UiKey.Special -> {
-                    val size = if (k.type == SpecialKey.SPACE) 16f else 17f
-                    row.addView(makeButton(k.label, k.weight, true, size) { onSpecialKey(k.type) })
+                    val size = when (k.type) {
+                        SpecialKey.SPACE -> 13f
+                        else -> 17f
+                    }
+                    val isEnter = k.type == SpecialKey.ENTER
+                    row.addView(
+                        makeButton(k.label, k.weight, true, size, { onSpecialKey(k.type) }, isEnter)
+                    )
                 }
             }
         }
@@ -267,7 +371,7 @@ class NexaKeyboardService : InputMethodService() {
         val r2 = if (isBangla) BijoyLayout.row2 else EnglishLayout.row2
         val r3 = if (isBangla) BijoyLayout.row3 else EnglishLayout.row3
 
-        addRow(root, numbers.map { UiKey.Char(it) })
+        if (showNumberRow) addRow(root, numbers.map { UiKey.Char(it) }, 18f)
         addRow(root, r1.map { UiKey.Char(it) })
         addRow(root, r2.map { UiKey.Char(it) })
         addRow(
@@ -283,7 +387,7 @@ class NexaKeyboardService : InputMethodService() {
                 UiKey.Special(SpecialKey.LANG, if (isBangla) "EN" else "বাং", 1.2f),
                 UiKey.Special(SpecialKey.EMOJI, "😀", 1.1f),
                 UiKey.Special(SpecialKey.MIC, "🎤", 1f),
-                UiKey.Special(SpecialKey.SPACE, "স্পেস", 3f),
+                UiKey.Special(SpecialKey.SPACE, spaceLabel(), 3f),
                 UiKey.Special(SpecialKey.DOT, if (isBangla) "।" else ".", 1f),
                 UiKey.Special(SpecialKey.ENTER, "⏎", 1.2f)
             )
@@ -300,7 +404,7 @@ class NexaKeyboardService : InputMethodService() {
             listOf(
                 UiKey.Special(SpecialKey.ABC, "ABC", 1.5f),
                 UiKey.Special(SpecialKey.LANG, if (lastLangMode == Mode.BANGLA) "EN" else "বাং", 1.2f),
-                UiKey.Special(SpecialKey.SPACE, "স্পেস", 4f),
+                UiKey.Special(SpecialKey.SPACE, spaceLabel(), 4f),
                 UiKey.Special(SpecialKey.ENTER, "⏎", 1.2f)
             )
         )
@@ -315,7 +419,7 @@ class NexaKeyboardService : InputMethodService() {
             listOf(
                 UiKey.Special(SpecialKey.ABC, "ABC", 1.5f),
                 UiKey.Special(SpecialKey.LANG, if (lastLangMode == Mode.BANGLA) "EN" else "বাং", 1.2f),
-                UiKey.Special(SpecialKey.SPACE, "স্পেস", 4f),
+                UiKey.Special(SpecialKey.SPACE, spaceLabel(), 4f),
                 UiKey.Special(SpecialKey.ENTER, "⏎", 1.2f)
             )
         )
@@ -351,7 +455,7 @@ class NexaKeyboardService : InputMethodService() {
             root,
             listOf(
                 UiKey.Special(SpecialKey.ABC, "ABC", 1.5f),
-                UiKey.Special(SpecialKey.SPACE, "স্পেস", 4f),
+                UiKey.Special(SpecialKey.SPACE, spaceLabel(), 4f),
                 UiKey.Special(SpecialKey.ENTER, "⏎", 1.2f)
             )
         )
@@ -371,7 +475,7 @@ class NexaKeyboardService : InputMethodService() {
             root,
             listOf(
                 UiKey.Special(SpecialKey.ABC, "ABC", 1.5f),
-                UiKey.Special(SpecialKey.SPACE, "স্পেস", 4f),
+                UiKey.Special(SpecialKey.SPACE, spaceLabel(), 4f),
                 UiKey.Special(SpecialKey.ENTER, "⏎", 1.2f)
             )
         )
@@ -432,9 +536,24 @@ class NexaKeyboardService : InputMethodService() {
 
         if (mode == Mode.BANGLA) {
             if (outIsPreBase) {
+                // v2.2 — pre-base signs (ি / ে / ৈ) work BOTH ways:
+                // (a) Gboard style: tapped AFTER a Bengali consonant,
+                //     commit immediately. Unicode stores consonant +
+                //     sign, which renders the sign before the consonant
+                //     (ক then ি -> কি, ক then ে -> কে).
+                // (b) Bijoy style: no consonant before the cursor,
+                //     hold as pending composing text and commit it
+                //     right after the next consonant (ি then ক -> কি).
                 if (pendingPreBase != null) ic.commitText(pendingPreBase!!, 1)
-                pendingPreBase = out
-                ic.setComposingText(out, 1)
+                pendingPreBase = null
+                val before = currentInputConnection
+                    ?.getTextBeforeCursor(1, 0)?.toString()?.lastOrNull()
+                if (before != null && isBengaliConsonant(before)) {
+                    ic.commitText(out, 1)
+                } else {
+                    pendingPreBase = out
+                    ic.setComposingText(out, 1)
+                }
             } else if (pendingPreBase != null) {
                 val pending = pendingPreBase!!
                 pendingPreBase = null
@@ -530,6 +649,7 @@ class NexaKeyboardService : InputMethodService() {
             SpecialKey.MIC -> startVoiceTyping()
             SpecialKey.GRAMMAR -> runGrammarFix()
             SpecialKey.TONE -> runToneChange()
+            SpecialKey.SETTINGS -> openSettings()
             SpecialKey.PASTE -> doPaste()
             SpecialKey.UNDO -> doUndo()
             SpecialKey.REDO -> doRedo()
@@ -544,9 +664,29 @@ class NexaKeyboardService : InputMethodService() {
         }
     }
 
+    /** Bengali consonants: ক–হ (U+0995–U+09B9) and ড়, ঢ়, য় (U+09DC–U+09DF). */
+    private fun isBengaliConsonant(ch: Char): Boolean =
+        (ch in '\u0995'..'\u09B9') || (ch in '\u09DC'..'\u09DF')
+
     private fun refreshKeyboard() {
         setInputView(buildView())
         updateSuggestions()
+    }
+
+    /**
+     * v2.2 — ⚙️ settings icon in the toolbar. Opens the NexaKeyboard
+     * Settings screen (MainActivity) straight from the keyboard, so
+     * Murad never has to leave the app he is typing in and open
+     * NexaKeyboard from the launcher. A service is not an activity,
+     * so the Intent needs FLAG_ACTIVITY_NEW_TASK. Any pending
+     * pre-base sign is committed first, so nothing typed is lost.
+     */
+    private fun openSettings() {
+        flushPending()
+        val intent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
     }
 
     // ---------- Paste / clipboard ----------
@@ -723,6 +863,44 @@ class NexaKeyboardService : InputMethodService() {
         for (i in suggestionViews.indices) {
             suggestionViews[i].text = list.getOrNull(i) ?: ""
         }
+        updateClipboardChip()
+    }
+
+    /**
+     * v2.2 — clipboard preview chip. Reads the system clipboard every
+     * time the suggestions refresh (keyboard shown, key pressed, mode
+     * changed), so text copied in any app appears at once. Shows a
+     * short preview (first ~20 characters, "…" if longer); the full
+     * text is kept for the tap. Empty clipboard -> chip hidden, the
+     * normal 3 word suggestions stay as they are.
+     */
+    private fun updateClipboardChip() {
+        val chip = clipboardChipView ?: return
+        val text = try {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            cm?.primaryClip?.getItemAt(0)?.text?.toString()?.trim()
+        } catch (e: Exception) {
+            null
+        }
+        if (text.isNullOrEmpty()) {
+            clipboardFullText = null
+            chip.visibility = View.GONE
+            return
+        }
+        clipboardFullText = text
+        val flat = text.replace(Regex("\\s+"), " ")
+        val preview = if (flat.length > 20) flat.take(20) + "…" else flat
+        chip.text = "📋 $preview"
+        chip.visibility = View.VISIBLE
+    }
+
+    /** Tapping the clipboard chip pastes the FULL copied text. */
+    private fun onClipboardChipClicked() {
+        val text = clipboardFullText ?: return
+        pushUndoSnapshot()
+        currentInputConnection?.commitText(text, 1)
+        SettingsStore.addClipboardItem(this, text)
+        updateSuggestions()
     }
 
     private fun onSuggestionClicked(suggestion: String) {

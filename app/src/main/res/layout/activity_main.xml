@@ -285,12 +285,20 @@
                 android:text="Tall" />
         </RadioGroup>
 
+        <Switch
+            android:id="@+id/switch_number_row"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:checked="true"
+            android:text="Number row দেখান (বাংলা সংখ্যা — বন্ধ করলে Gboard-এর মতো দেখাবে)" />
+
         <!-- 6. Toolbar order -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
-            android:text="৬. সাজেশন বারের ক্রম (Paste / Undo / Redo)"
+            android:text="৬. টুলবার (আইকন-শুধু — দেখান / লুকান / ক্রম বদলান)"
             android:textSize="17sp"
             android:textStyle="bold" />
 
@@ -298,7 +306,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="Up / Down চেপে ক্রম বদলান — কীবোর্ডে সেই ক্রমেই দেখাবে।"
+            android:text="কীবোর্ডে টুলবারে শুধু আইকন দেখাবে — কোনো লেখা থাকবে না। টিক চিহ্ন দিয়ে দেখান/লুকান, Up / Down চেপে ক্রম বদলান।"
             android:textSize="14sp" />
 
         <LinearLayout

@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.RadioButton
@@ -27,10 +28,17 @@ import androidx.appcompat.app.AppCompatActivity
  */
 class MainActivity : AppCompatActivity() {
 
+    // Toolbar editor: every item, icon + name, in Settings.
+    // The keyboard itself shows icons only, in the saved visible order.
     private val toolbarLabels = mapOf(
-        "paste" to "Paste",
-        "undo" to "Undo",
-        "redo" to "Redo"
+        "grammar" to "✎ Grammar Fix",
+        "tone" to "🎭 Tone",
+        "clipboard" to "📋 Clipboard",
+        "phrases" to "💬 Phrases",
+        "paste" to "📥 Paste",
+        "undo" to "↩ Undo",
+        "redo" to "↪ Redo",
+        "settings" to "⚙️ Settings"
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -156,6 +164,13 @@ class MainActivity : AppCompatActivity() {
             SettingsStore.prefs(this).edit().putString("keyboard_height", v).apply()
         }
 
+        // Number row on/off (default: on).
+        val swNumberRow = findViewById<Switch>(R.id.switch_number_row)
+        swNumberRow.isChecked = SettingsStore.showNumberRow(this)
+        swNumberRow.setOnCheckedChangeListener { _, checked ->
+            SettingsStore.prefs(this).edit().putBoolean("number_row", checked).apply()
+        }
+
         // ---------- 6. Toolbar order ----------
         refreshToolbarOrder()
 
@@ -194,48 +209,78 @@ class MainActivity : AppCompatActivity() {
             "শেষ ১০টা কপি করা লেখা কীবোর্ডে জমা থাকে। এখন জমা আছে: $count টা।"
     }
 
+    /**
+     * Toolbar editor: all 8 items, visible ones first in saved order,
+     * then hidden ones. Each row has a Show checkbox and Up / Down
+     * buttons (Up/Down only move visible items). Unchecking hides the
+     * item from the keyboard; checking it again brings it back at the
+     * end, and it can then be moved up.
+     */
     private fun refreshToolbarOrder() {
         val container = findViewById<LinearLayout>(R.id.layout_toolbar_order)
         container.removeAllViews()
-        var order = SettingsStore.toolbarOrder(this)
-        order.forEachIndexed { index, item ->
+        val visible = SettingsStore.toolbarOrder(this).toMutableList()
+        val displayOrder = visible + SettingsStore.TOOLBAR_ITEMS.filter { it !in visible }
+        for (item in displayOrder) {
+            val isVisible = item in visible
+            val index = visible.indexOf(item)
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(0, 8, 0, 8)
             }
+            val check = CheckBox(this).apply {
+                isChecked = isVisible
+                setOnCheckedChangeListener { _, checked ->
+                    val current = SettingsStore.toolbarOrder(this@MainActivity).toMutableList()
+                    if (checked && item !in current) {
+                        current.add(item)
+                    } else if (!checked) {
+                        current.remove(item)
+                    }
+                    SettingsStore.saveToolbarOrder(this@MainActivity, current)
+                    refreshToolbarOrder()
+                }
+            }
             val label = TextView(this).apply {
-                text = "${index + 1}. ${toolbarLabels[item] ?: item}"
+                text = toolbarLabels[item] ?: item
                 textSize = 16f
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
             val btnUp = Button(this).apply {
                 text = "↑ Up"
+                isEnabled = isVisible && index > 0
                 setOnClickListener {
-                    if (index > 0) {
-                        val mutable = order.toMutableList()
-                        val tmp = mutable[index - 1]
-                        mutable[index - 1] = mutable[index]
-                        mutable[index] = tmp
-                        order = mutable
-                        SettingsStore.saveToolbarOrder(this@MainActivity, mutable)
-                        refreshToolbarOrder()
+                    if (isVisible && index > 0) {
+                        val mutable = SettingsStore.toolbarOrder(this@MainActivity).toMutableList()
+                        val pos = mutable.indexOf(item)
+                        if (pos > 0) {
+                            val tmp = mutable[pos - 1]
+                            mutable[pos - 1] = mutable[pos]
+                            mutable[pos] = tmp
+                            SettingsStore.saveToolbarOrder(this@MainActivity, mutable)
+                            refreshToolbarOrder()
+                        }
                     }
                 }
             }
             val btnDown = Button(this).apply {
                 text = "↓ Down"
+                isEnabled = isVisible && index >= 0 && index < visible.size - 1
                 setOnClickListener {
-                    if (index < order.size - 1) {
-                        val mutable = order.toMutableList()
-                        val tmp = mutable[index + 1]
-                        mutable[index + 1] = mutable[index]
-                        mutable[index] = tmp
-                        order = mutable
-                        SettingsStore.saveToolbarOrder(this@MainActivity, mutable)
-                        refreshToolbarOrder()
+                    if (isVisible) {
+                        val mutable = SettingsStore.toolbarOrder(this@MainActivity).toMutableList()
+                        val pos = mutable.indexOf(item)
+                        if (pos >= 0 && pos < mutable.size - 1) {
+                            val tmp = mutable[pos + 1]
+                            mutable[pos + 1] = mutable[pos]
+                            mutable[pos] = tmp
+                            SettingsStore.saveToolbarOrder(this@MainActivity, mutable)
+                            refreshToolbarOrder()
+                        }
                     }
                 }
             }
+            row.addView(check)
             row.addView(label)
             row.addView(btnUp)
             row.addView(btnDown)
