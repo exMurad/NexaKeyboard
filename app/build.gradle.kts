@@ -37,14 +37,14 @@ dependencies {
 
 // Launcher icon: the PNG cannot be pushed to GitHub as a binary, so the
 // icon is stored as Base64 text in app/icon.png.b64 and decoded into the
-// mipmap folders at build time, before resources are merged.
-tasks.register("decodeLauncherIcon") {
-    doLast {
-        val b64File = file("icon.png.b64")
-        if (!b64File.exists()) {
-            println("decodeLauncherIcon: icon.png.b64 not found, skipping")
-            return@doLast
-        }
+// mipmap folders when this script is evaluated — i.e. before ANY build task
+// (including resource merging) runs, so @mipmap/ic_launcher always resolves.
+// (The earlier approach — a decodeLauncherIcon task hooked into preBuild —
+// left the timing to the task graph; build #5 still failed with the icon
+// resource missing, so the decode now happens at configuration time.)
+run {
+    val b64File = file("icon.png.b64")
+    if (b64File.exists()) {
         val bytes = java.util.Base64.getMimeDecoder()
             .decode(b64File.readText().replace("\\s".toRegex(), ""))
         val densities = listOf("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi")
@@ -53,10 +53,8 @@ tasks.register("decodeLauncherIcon") {
             dir.mkdirs()
             java.io.File(dir, "ic_launcher.png").writeBytes(bytes)
         }
-        println("decodeLauncherIcon: wrote ic_launcher.png for ${densities.size} densities")
+        println("launcher icon: decoded icon.png.b64 for ${densities.size} densities")
+    } else {
+        println("launcher icon: icon.png.b64 not found, skipping")
     }
-}
-
-tasks.named("preBuild").configure {
-    dependsOn("decodeLauncherIcon")
 }
