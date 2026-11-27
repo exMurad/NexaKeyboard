@@ -3,6 +3,9 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+import java.io.File
+import java.util.Base64
+
 android {
     namespace = "com.murad.nexakeyboard"
     compileSdk = 34
@@ -45,13 +48,13 @@ dependencies {
 run {
     val b64File = file("icon.png.b64")
     if (b64File.exists()) {
-        val bytes = java.util.Base64.getMimeDecoder()
+        val bytes = Base64.getMimeDecoder()
             .decode(b64File.readText().replace("\\s".toRegex(), ""))
         val densities = listOf("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi")
         for (d in densities) {
             val dir = file("src/main/res/mipmap-$d")
             dir.mkdirs()
-            java.io.File(dir, "ic_launcher.png").writeBytes(bytes)
+            File(dir, "ic_launcher.png").writeBytes(bytes)
         }
         println("launcher icon: decoded icon.png.b64 for ${densities.size} densities")
     } else {
