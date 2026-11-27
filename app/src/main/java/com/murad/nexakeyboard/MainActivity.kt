@@ -1,8 +1,13 @@
 package com.murad.nexakeyboard
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
+import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.CheckBox
@@ -14,19 +19,28 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 
 /**
- * NexaKeyboard Settings (v2).
+ * NexaKeyboard Settings (v2.4).
  *
- * Sections: enable / pick keyboard, Gemini API key (save / update / clear /
- * test — the test only checks the key is non-empty, it makes no network
- * call), Tone chooser, per-language autocorrect, theme editor, toolbar
- * order (Paste / Undo / Redo, Up/Down), Quick Phrases (add/delete),
- * clipboard history (clear).
+ * Sections (top to bottom): microphone permission, Gemini API key
+ * (save / update / clear / REAL test that calls Gemini), enable /
+ * pick keyboard, Tone chooser, per-language autocorrect, Bangla
+ * layout, theme editor, toolbar order (Paste / Undo / Redo, Up/Down),
+ * Quick Phrases (add/delete), clipboard history (clear).
  *
- * The full API key is never displayed — only "saved" / "not set".
+ * The full API key is never displayed — only "saved" / "not set",
+ * plus the last 4 characters so the user can see WHICH key is saved.
+ * A key that does not start with "AIza" is NOT a Gemini API key, so
+ * saving one shows a clear warning (but still saves it).
  */
 class MainActivity : AppCompatActivity() {
+
+    companion object {
+        private const val REQUEST_MIC = 1001
+    }
 
     // Toolbar editor: every item, icon + name, in Settings.
     // The keyboard itself shows icons only, in the saved visible order.
@@ -44,6 +58,24 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        // ---------- 0. Microphone permission (v2.4) ----------
+        // Voice typing needs RECORD_AUDIO at RUNTIME — declaring it in
+        // the manifest alone is not enough, and no code ever asked for
+        // it, so the mic failed the instant it was tapped. Ask on
+        // launch (with a Bengali explanation first) and show the
+        // state in a visible row the user can come back to.
+        refreshMicStatus()
+        findViewById<Button>(R.id.btn_mic_permission).setOnClickListener {
+            requestMicPermission()
+        }
+        if (!hasMicPermission()) {
+            Toast.makeText(
+                this, "ভয়েস টাইপিংয়ের জন্য মাইকের অনুমতি লাগবে",
+                Toast.LENGTH_LONG
+            ).show()
+            requestMicPermission()
+        }
 
         // ---------- 1. Enable / pick ----------
         findViewById<Button>(R.id.btn_enable).setOnClickListener {
@@ -67,7 +99,27 @@ class MainActivity : AppCompatActivity() {
             SettingsStore.saveGeminiKey(this, key)
             editKey.text.clear()
             refreshKeyStatus()
-            Toast.makeText(this, "Gemini API key saved ✓", Toast.LENGTH_SHORT).show()
+            // v2.4 — say exactly WHAT was saved, so there is no
+            // doubt: the last 4 characters prove the key landed.
+            Toast.makeText(
+                this, "Gemini API key saved ✓ — শেষ ৪ অক্ষর: ${key.takeLast(4)}",
+                Toast.LENGTH_LONG
+            ).show()
+            // Real Gemini keys start with "AIza" — anything else
+            // (e.g. a key starting "AQ.Ab8R") is not a Gemini API
+            // key and the Test will fail. Warn, but still save it.
+            if (!key.startsWith("AIza")) {
+                Toast.makeText(
+                    this,
+                    "সতর্কতা: এটা Gemini API কী মনে হচ্ছে না — 'AIza' দিয়ে শুরু হওয়া কী লাগবে",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+        findViewById<Button>(R.id.btn_get_key).setOnClickListener {
+            startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com"))
+            )
         }
         findViewById<Button>(R.id.btn_clear_key).setOnClickListener {
             SettingsStore.clearGeminiKey(this)
@@ -89,12 +141,14 @@ class MainActivity : AppCompatActivity() {
             }
             btnTest.isEnabled = false
             statusView.text = "Testing… — Gemini-কে ডাকা হচ্ছে…"
+            statusView.setTextColor(Color.parseColor("#5F6368"))
             GeminiClient.testKey(key) { result ->
                 btnTest.isEnabled = true
                 when (result) {
                     is GeminiClient.GeminiResult.Ok -> {
                         val reply = result.text.take(40)
                         statusView.text = "Test passed ✓ — Gemini is working (উত্তর: $reply)"
+                        statusView.setTextColor(Color.parseColor("#1E8E3E"))
                         Toast.makeText(
                             this, "Test passed ✓ — Gemini is working",
                             Toast.LENGTH_SHORT
@@ -102,6 +156,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     is GeminiClient.GeminiResult.Fail -> {
                         statusView.text = "Test failed: ${result.reason}"
+                        statusView.setTextColor(Color.parseColor("#D93025"))
                         Toast.makeText(
                             this, "Test failed: ${result.reason}",
                             Toast.LENGTH_LONG
@@ -185,9 +240,9 @@ class MainActivity : AppCompatActivity() {
             "medium" to R.id.radio_height_medium,
             "tall" to R.id.radio_height_tall
         )
-        heightGroup.check(heightToId[SettingsStore.keyboardHeight(this)] ?: R.id.radio_height_medium)
+        heightGroup.check(heightToId[SettingsStore.keyboardHeight(this)] ?: R.id.radio_height_short)
         heightGroup.setOnCheckedChangeListener { _, checkedId ->
-            val v = heightToId.entries.firstOrNull { it.value == checkedId }?.key ?: "medium"
+            val v = heightToId.entries.firstOrNull { it.value == checkedId }?.key ?: "short"
             SettingsStore.prefs(this).edit().putString("keyboard_height", v).apply()
         }
 
@@ -225,24 +280,94 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        refreshMicStatus()
         refreshKeyStatus()
         refreshToolbarOrder()
         refreshPhrases()
         refreshClipboardInfo()
     }
 
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_MIC) {
+            refreshMicStatus()
+            if (grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED
+            ) {
+                Toast.makeText(
+                    this, "মাইকের অনুমতি দেওয়া হয়েছে ✓ — এখন ভয়েস টাইপিং চলবে",
+                    Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                Toast.makeText(
+                    this,
+                    "মাইকের অনুমতি দেওয়া হয়নি — ভয়েস টাইপিং চলবে না",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
+    private fun hasMicPermission(): Boolean =
+        ContextCompat.checkSelfPermission(
+            this, Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+
+    private fun requestMicPermission() {
+        ActivityCompat.requestPermissions(
+            this, arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_MIC
+        )
+    }
+
     /**
-     * v2.3 — the status line always shows the real state, big and
-     * visible: "API key: saved ✓ (…last 4 characters)" — the full key
-     * is never shown — or "API key: not set".
+     * v2.4 — the mic-permission row at the top of Settings: green
+     * "অনুমতি দেওয়া হয়েছে ✓" when granted, red "অনুমতি দেওয়া
+     * হয়নি" + a working [অনুমতি দিন] button when not.
+     */
+    private fun refreshMicStatus() {
+        val status = findViewById<TextView>(R.id.text_mic_status)
+        val button = findViewById<Button>(R.id.btn_mic_permission)
+        if (hasMicPermission()) {
+            status.text = "মাইক্রোফোন: অনুমতি দেওয়া হয়েছে ✓"
+            status.setTextColor(Color.parseColor("#1E8E3E"))
+            button.text = "অনুমতি দেওয়া আছে ✓"
+            button.isEnabled = false
+        } else {
+            status.text = "মাইক্রোফোন: অনুমতি দেওয়া হয়নি"
+            status.setTextColor(Color.parseColor("#D93025"))
+            button.text = "অনুমতি দিন"
+            button.isEnabled = true
+        }
+    }
+
+    /**
+     * v2.4 — the status line is BIG (18sp, bold) and coloured, at
+     * the TOP of the Settings screen, so it cannot be missed:
+     * green "✓ সেভ হয়েছে — শেষ ৪ অক্ষর: XXXX" when a key is saved,
+     * red "এখনো কোনো কী দেওয়া হয়নি" when not set. A saved key
+     * that does not start with "AIza" also shows a red warning line
+     * underneath, because it is not a Gemini API key.
      */
     private fun refreshKeyStatus() {
         val status = findViewById<TextView>(R.id.text_key_status)
+        val warning = findViewById<TextView>(R.id.text_key_warning)
         val key = SettingsStore.geminiKey(this)
-        status.text = if (key.isNotBlank()) {
-            "API key: saved ✓ (…${key.takeLast(4)})"
+        if (key.isNotBlank()) {
+            status.text = "✓ সেভ হয়েছে — শেষ ৪ অক্ষর: ${key.takeLast(4)}"
+            status.setTextColor(Color.parseColor("#1E8E3E"))
+            if (!key.startsWith("AIza")) {
+                warning.text =
+                    "⚠ এটা Gemini API কী মনে হচ্ছে না — Google AI Studio থেকে 'AIza' দিয়ে শুরু হওয়া কী নিন"
+                warning.visibility = View.VISIBLE
+            } else {
+                warning.visibility = View.GONE
+            }
         } else {
-            "API key: not set"
+            status.text = "এখনো কোনো কী দেওয়া হয়নি"
+            status.setTextColor(Color.parseColor("#D93025"))
+            warning.visibility = View.GONE
         }
     }
 

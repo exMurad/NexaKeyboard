@@ -1,12 +1,15 @@
 package com.murad.nexakeyboard
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.inputmethodservice.InputMethodService
+import android.media.AudioManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -23,6 +26,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import java.util.ArrayDeque
 import java.util.Locale
 
@@ -41,7 +45,8 @@ enum class Mode {
 }
 
 /**
- * NexaKeyboard — version 2.3 (flat Gboard layout + direct Bengali keys).
+ * NexaKeyboard — version 2.4 (mic permission fix, shorter keyboard,
+ * clearer Gemini key UX).
  *
  * The keyboard is now FLAT like Gboard: letter keys have no grey
  * boxes at all — just the letter on the dark (#202124) or light
@@ -118,6 +123,7 @@ class NexaKeyboardService : InputMethodService() {
 
     override fun onDestroy() {
         stopHoldRepeat()
+        setVoiceBeepsMuted(false)
         speechRecognizer?.destroy()
         speechRecognizer = null
         super.onDestroy()
@@ -128,9 +134,11 @@ class NexaKeyboardService : InputMethodService() {
         keyColour = SettingsStore.keyColour(this)
         keyShape = SettingsStore.keyShape(this)
         keyHeightDp = when (SettingsStore.keyboardHeight(this)) {
-            "short" -> 46
-            "tall" -> 62
-            else -> 54
+            "medium" -> 46
+            "tall" -> 52
+            // v2.4 — default is now "short" (40dp): at the old default
+            // (54dp, 7 rows) the keyboard covered the whole display.
+            else -> 40
         }
         autocorrectBangla = SettingsStore.autocorrectBangla(this)
         autocorrectEnglish = SettingsStore.autocorrectEnglish(this)
@@ -221,7 +229,7 @@ class NexaKeyboardService : InputMethodService() {
             setPadding(dp(4), dp(6), dp(4), dp(6))
         }
 
-        // One slim Gboard-like toolbar row (36dp, flat, no grey key boxes),
+        // One slim Gboard-like toolbar row (32dp, flat, no grey key boxes),
         // icon-only so 5-6 items fit in one row. Only the visible items,
         // in the saved order from Settings, are rendered here.
         if (mode == Mode.BANGLA || mode == Mode.ENGLISH) {
@@ -243,14 +251,14 @@ class NexaKeyboardService : InputMethodService() {
                 }
                 toolbar.addView(
                     makeToolbarButton(label) { onSpecialKey(type) },
-                    LinearLayout.LayoutParams(0, dp(36), 1f)
+                    LinearLayout.LayoutParams(0, dp(32), 1f)
                 )
             }
             // v2.3 — mic at the TOP-RIGHT of the toolbar, like Gboard
             // (it used to sit in the bottom letter row).
             toolbar.addView(
                 makeToolbarButton("🎤") { startVoiceTyping() },
-                LinearLayout.LayoutParams(0, dp(36), 1f)
+                LinearLayout.LayoutParams(0, dp(32), 1f)
             )
             root.addView(toolbar)
 
@@ -942,7 +950,41 @@ class NexaKeyboardService : InputMethodService() {
 
     // ---------- Voice typing ----------
 
+    /**
+     * v2.4 — no-beep voice typing: the recognizer service plays a
+     * short beep when listening starts (and some builds beep again
+     * while listening). Mute the streams it uses before
+     * startListening() and unmute as soon as the session ends, so
+     * voice typing is silent. Muting is restored in onResults,
+     * onError, the startListening catch, and onDestroy — the phone's
+     * normal sound is never left muted.
+     */
+    private fun setVoiceBeepsMuted(muted: Boolean) {
+        try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            am.setStreamMute(AudioManager.STREAM_MUSIC, muted)
+            am.setStreamMute(AudioManager.STREAM_NOTIFICATION, muted)
+            am.setStreamMute(AudioManager.STREAM_SYSTEM, muted)
+        } catch (e: Exception) {
+            // Muting is best-effort only; never break voice typing.
+        }
+    }
+
     private fun startVoiceTyping() {
+        // v2.4 — BUG FIX: RECORD_AUDIO was declared in the manifest
+        // but NEVER requested at runtime, so SpeechRecognizer failed
+        // instantly with ERROR_INSUFFICIENT_PERMISSIONS and the mic
+        // "failed on click". A service cannot request a permission
+        // itself, so check first — and if it is missing, tell the
+        // user plainly and open Settings where he can grant it.
+        if (ContextCompat.checkSelfPermission(
+                this, Manifest.permission.RECORD_AUDIO
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            toast("মাইকের অনুমতি দেওয়া হয়নি — NexaKeyboard অ্যাপ খুলে অনুমতি দিন")
+            openSettings()
+            return
+        }
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             toast("এই ফোনে ভয়েস টাইপিং পাওয়া যাচ্ছে না")
             return
@@ -959,6 +1001,10 @@ class NexaKeyboardService : InputMethodService() {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, locale.toLanguageTag())
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            // v2.4 — partial results were handled in onPartialResults
+            // but never actually requested, so the live "শুনছি…"
+            // feedback often never appeared.
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         }
         recognizer.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
@@ -985,6 +1031,7 @@ class NexaKeyboardService : InputMethodService() {
 
             override fun onError(error: Int) {
                 setVoiceStatus(null)
+                setVoiceBeepsMuted(false)
                 val msg = when (error) {
                     SpeechRecognizer.ERROR_NO_MATCH,
                     SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
@@ -1014,6 +1061,7 @@ class NexaKeyboardService : InputMethodService() {
                     ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     ?.firstOrNull()
                     ?.trim()
+                setVoiceBeepsMuted(false)
                 recognizer.destroy()
                 if (speechRecognizer == recognizer) speechRecognizer = null
                 if (raw.isNullOrEmpty()) {
@@ -1049,10 +1097,12 @@ class NexaKeyboardService : InputMethodService() {
             }
         })
         try {
+            setVoiceBeepsMuted(true)
             recognizer.startListening(intent)
             setVoiceStatus("🎤 শুনছি…")
             toast("বলুন…")
         } catch (e: Exception) {
+            setVoiceBeepsMuted(false)
             setVoiceStatus(null)
             toast("ভয়েস টাইপিং শুরু করা যায়নি")
         }

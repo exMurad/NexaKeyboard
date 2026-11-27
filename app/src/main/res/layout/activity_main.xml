@@ -20,47 +20,16 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="Gboard-ধাঁচের বাংলা + ইংরেজি কীবোর্ড — সংস্করণ v2.3"
+            android:text="Gboard-ধাঁচের বাংলা + ইংরেজি কীবোর্ড — সংস্করণ v2.4"
             android:textSize="15sp" />
 
-        <!-- 1. Enable -->
+        <!-- Microphone permission (v2.4) — right at the top, so the
+             user can see at once whether voice typing is allowed. -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="১. কীবোর্ড চালু করুন"
-            android:textSize="17sp"
-            android:textStyle="bold" />
-
-        <Button
-            android:id="@+id/btn_enable"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="কীবোর্ড চালু করুন" />
-
-        <Button
-            android:id="@+id/btn_pick"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="কীবোর্ড বেছে নিন" />
-
-        <EditText
-            android:id="@+id/edit_test"
-            android:layout_width="match_parent"
-            android:layout_height="120dp"
-            android:layout_marginTop="8dp"
-            android:gravity="top"
-            android:hint="এখানে টাইপ করে দেখুন…"
-            android:inputType="textMultiLine" />
-
-        <!-- 2. Gemini API key -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="২. Gemini API কী (ভয়েস রিফাইন + AI)"
+            android:text="🎤 মাইক্রোফোন অনুমতি (ভয়েস টাইপিং)"
             android:textSize="17sp"
             android:textStyle="bold" />
 
@@ -68,7 +37,41 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="অ্যাপ ইনস্টল করার পরে এখানে কী বসান। পরে যখন খুশি বদলানো যাবে। কী-টা ফোনেই থাকে, কোডে লেখা থাকে না।"
+            android:text="ভয়েস টাইপিংয়ের জন্য মাইকের অনুমতি লাগবে। অনুমতি না থাকলে মাইক বোতাম চাপলেই ভয়েস ব্যর্থ হবে।"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/text_mic_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="মাইক্রোফোন: অনুমতি দেওয়া হয়নি"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btn_mic_permission"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="অনুমতি দিন" />
+
+        <!-- 1. Gemini API key (moved to the TOP in v2.4 — it was
+             buried in a long screen before, so Save/Test results
+             were easy to miss) -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="১. Gemini API কী (ভয়েস রিফাইন + AI)"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="অ্যাপ ইনস্টল করার পরে এখানে কী বসান। পরে যখন খুশি বদলানো যাবে। কী-টা ফোনেই থাকে, কোডে লেখা থাকে না। আসল Gemini কী 'AIza' দিয়ে শুরু হয় — Google AI Studio থেকে নিতে হয়।"
             android:textSize="14sp" />
 
         <EditText
@@ -108,14 +111,62 @@
                 android:text="Clear" />
         </LinearLayout>
 
+        <Button
+            android:id="@+id/btn_get_key"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="AI Studio থেকে কী নিন" />
+
         <TextView
             android:id="@+id/text_key_status"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="API key: not set"
+            android:text="এখনো কোনো কী দেওয়া হয়নি"
             android:textSize="18sp"
             android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/text_key_warning"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <!-- 2. Enable -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="২. কীবোর্ড চালু করুন"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btn_enable"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="কীবোর্ড চালু করুন" />
+
+        <Button
+            android:id="@+id/btn_pick"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="কীবোর্ড বেছে নিন" />
+
+        <EditText
+            android:id="@+id/edit_test"
+            android:layout_width="match_parent"
+            android:layout_height="120dp"
+            android:layout_marginTop="8dp"
+            android:gravity="top"
+            android:hint="এখানে টাইপ করে দেখুন…"
+            android:inputType="textMultiLine" />
 
         <!-- 3. Tone -->
         <TextView

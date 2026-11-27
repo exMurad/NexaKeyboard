@@ -18,7 +18,9 @@ import org.json.JSONArray
  *  dark_theme          Boolean, default true
  *  key_colour          String: "grey" | "dark" | "blue", default "grey"
  *  key_shape           String: "rounded" | "square", default "rounded"
- *  keyboard_height     String: "short" | "medium" | "tall", default "medium"
+ *  keyboard_height     String: "short" | "medium" | "tall", default "short"
+ *                      (v2.4 — was "medium"; the keyboard was too tall and
+ *                      covered the whole display, so "short" is now default)
  *  number_row          Boolean, default true (show the Bangla/English number row)
  *  bangla_layout       String: "gboard" | "bijoy", default "gboard"
  *                      (Gboard = direct Bengali alphabet layout;
@@ -97,7 +99,7 @@ object SettingsStore {
         prefs(context).getString("key_shape", "rounded") ?: "rounded"
 
     fun keyboardHeight(context: Context): String =
-        prefs(context).getString("keyboard_height", "medium") ?: "medium"
+        prefs(context).getString("keyboard_height", "short") ?: "short"
 
     fun showNumberRow(context: Context): Boolean =
         prefs(context).getBoolean("number_row", true)
